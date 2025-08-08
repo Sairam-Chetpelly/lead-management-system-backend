@@ -2,11 +2,64 @@ const express = require('express');
 const router = express.Router();
 const LeadSource = require('../models/LeadSource');
 
-// GET all lead sources
+// GET export lead sources
+router.get('/export', async (req, res) => {
+  try {
+    const leadSources = await LeadSource.find({ deletedAt: null })
+      .sort({ createdAt: -1 });
+    
+    const csvData = leadSources.map(source => ({
+      'Name': source.name,
+      'Slug': source.slug,
+      'Description': source.description,
+      'Type': source.isApiSource ? 'API' : 'Manual',
+      'Created': source.createdAt
+    }));
+    
+    res.json(csvData);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// GET all lead sources with pagination and filtering
 router.get('/', async (req, res) => {
   try {
-    const leadSources = await LeadSource.find({ deletedAt: null });
-    res.json(leadSources);
+    const { page = 1, limit = 10, search = '', isApiSource = '' } = req.query;
+    
+    const filter = { deletedAt: null };
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (isApiSource !== '') {
+      filter.isApiSource = isApiSource === 'true';
+    }
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const [leadSources, total] = await Promise.all([
+      LeadSource.find(filter)
+        .skip(skip)
+        .limit(parseInt(limit))
+        .sort({ createdAt: -1 }),
+      LeadSource.countDocuments(filter)
+    ]);
+    
+    res.json({
+      data: leadSources,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        total,
+        limit: parseInt(limit)
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

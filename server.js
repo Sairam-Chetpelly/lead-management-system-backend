@@ -13,6 +13,7 @@ const leadSourceRoutes = require('./routes/leadSources');
 const callLogRoutes = require('./routes/callLogs');
 const leadActivityRoutes = require('./routes/leadActivities');
 const projectHouseTypeRoutes = require('./routes/projectAndHouseTypes');
+const apiIntegrationRoutes = require('./routes/apiIntegration');
 
 const app = express();
 
@@ -43,6 +44,7 @@ app.use('/api/lead-sources', leadSourceRoutes);
 app.use('/api/call-logs', callLogRoutes);
 app.use('/api/lead-activities', leadActivityRoutes);
 app.use('/api/project-house-types', projectHouseTypeRoutes);
+app.use('/api/integration', apiIntegrationRoutes);
 
 const PORT = process.env.PORT || 5000;
 try {

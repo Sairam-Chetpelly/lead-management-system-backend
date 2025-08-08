@@ -38,7 +38,7 @@ router.get('/languages/all', authenticateToken, async (req, res) => {
 
 router.get('/statuses/all', authenticateToken, async (req, res) => {
   try {
-    const statuses = await Status.find({ deletedAt: null }).select('_id name slug');
+    const statuses = await Status.find({ deletedAt: null }).select('_id name slug type');
     res.json({ data: statuses });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -323,40 +323,34 @@ router.delete('/statuses/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Excel Export Routes
+// Export Routes (JSON for CSV)
 router.get('/roles/export', authenticateToken, async (req, res) => {
   try {
-    const roles = await Role.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
-    const worksheet = XLSX.utils.json_to_sheet(roles.map(role => ({
-      Name: role.name,
-      Slug: role.slug,
-      'Created At': new Date(role.createdAt).toLocaleDateString()
-    })));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Roles');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Disposition', 'attachment; filename=roles.xlsx');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
+    console.log('Roles export endpoint hit');
+    const roles = await Role.find({ deletedAt: null }).sort({ createdAt: -1 });
+    console.log('Found roles:', roles.length);
+    const csvData = roles.map(role => ({
+      'Name': role.name,
+      'Slug': role.slug,
+      'Created': role.createdAt
+    }));
+    console.log('Sending CSV data:', csvData.length, 'records');
+    res.json(csvData);
   } catch (error) {
+    console.error('Roles export error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
 router.get('/centres/export', authenticateToken, async (req, res) => {
   try {
-    const centres = await Centre.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
-    const worksheet = XLSX.utils.json_to_sheet(centres.map(centre => ({
-      Name: centre.name,
-      Slug: centre.slug,
-      'Created At': new Date(centre.createdAt).toLocaleDateString()
-    })));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Centres');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Disposition', 'attachment; filename=centres.xlsx');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
+    const centres = await Centre.find({ deletedAt: null }).sort({ createdAt: -1 });
+    const csvData = centres.map(centre => ({
+      'Name': centre.name,
+      'Slug': centre.slug,
+      'Created': centre.createdAt
+    }));
+    res.json(csvData);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -364,19 +358,14 @@ router.get('/centres/export', authenticateToken, async (req, res) => {
 
 router.get('/languages/export', authenticateToken, async (req, res) => {
   try {
-    const languages = await Language.find({ deletedAt: null }).select('name slug code createdAt').sort({ createdAt: -1 });
-    const worksheet = XLSX.utils.json_to_sheet(languages.map(language => ({
-      Name: language.name,
-      Slug: language.slug,
-      Code: language.code,
-      'Created At': new Date(language.createdAt).toLocaleDateString()
-    })));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Languages');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Disposition', 'attachment; filename=languages.xlsx');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
+    const languages = await Language.find({ deletedAt: null }).sort({ createdAt: -1 });
+    const csvData = languages.map(language => ({
+      'Name': language.name,
+      'Slug': language.slug,
+      'Code': language.code,
+      'Created': language.createdAt
+    }));
+    res.json(csvData);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -384,96 +373,15 @@ router.get('/languages/export', authenticateToken, async (req, res) => {
 
 router.get('/statuses/export', authenticateToken, async (req, res) => {
   try {
-    const statuses = await Status.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
-    const worksheet = XLSX.utils.json_to_sheet(statuses.map(status => ({
-      Name: status.name,
-      Slug: status.slug,
-      'Created At': new Date(status.createdAt).toLocaleDateString()
-    })));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Statuses');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Disposition', 'attachment; filename=statuses.xlsx');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Excel Export Routes
-router.get('/roles/export', authenticateToken, async (req, res) => {
-  try {
-    const roles = await Role.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
-    const worksheet = XLSX.utils.json_to_sheet(roles.map(role => ({
-      Name: role.name,
-      Slug: role.slug,
-      'Created At': new Date(role.createdAt).toLocaleDateString()
-    })));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Roles');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Disposition', 'attachment; filename=roles.xlsx');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-router.get('/centres/export', authenticateToken, async (req, res) => {
-  try {
-    const centres = await Centre.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
-    const worksheet = XLSX.utils.json_to_sheet(centres.map(centre => ({
-      Name: centre.name,
-      Slug: centre.slug,
-      'Created At': new Date(centre.createdAt).toLocaleDateString()
-    })));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Centres');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Disposition', 'attachment; filename=centres.xlsx');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-router.get('/languages/export', authenticateToken, async (req, res) => {
-  try {
-    const languages = await Language.find({ deletedAt: null }).select('name slug code createdAt').sort({ createdAt: -1 });
-    const worksheet = XLSX.utils.json_to_sheet(languages.map(language => ({
-      Name: language.name,
-      Slug: language.slug,
-      Code: language.code,
-      'Created At': new Date(language.createdAt).toLocaleDateString()
-    })));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Languages');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Disposition', 'attachment; filename=languages.xlsx');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-router.get('/statuses/export', authenticateToken, async (req, res) => {
-  try {
-    const statuses = await Status.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
-    const worksheet = XLSX.utils.json_to_sheet(statuses.map(status => ({
-      Name: status.name,
-      Slug: status.slug,
-      'Created At': new Date(status.createdAt).toLocaleDateString()
-    })));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Statuses');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Disposition', 'attachment; filename=statuses.xlsx');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
+    const statuses = await Status.find({ deletedAt: null }).sort({ createdAt: -1 });
+    const csvData = statuses.map(status => ({
+      'Name': status.name,
+      'Slug': status.slug,
+      'Type': status.type,
+      'Description': status.description,
+      'Created': status.createdAt
+    }));
+    res.json(csvData);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

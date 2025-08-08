@@ -149,9 +149,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Excel Export Route
+// Export Route (JSON for CSV)
 router.get('/export', authenticateToken, async (req, res) => {
   try {
+    console.log('Users export endpoint hit');
     const users = await User.find({ deletedAt: null })
       .populate('roleId', 'name')
       .populate('statusId', 'name')
@@ -160,27 +161,24 @@ router.get('/export', authenticateToken, async (req, res) => {
       .select('-password')
       .sort({ createdAt: -1 });
     
-    const worksheet = XLSX.utils.json_to_sheet(users.map(user => ({
-      Name: user.name,
-      Email: user.email,
+    console.log('Found users:', users.length);
+    const csvData = users.map(user => ({
+      'Name': user.name,
+      'Email': user.email,
       'Mobile Number': user.mobileNumber,
-      Designation: user.designation,
-      Role: user.roleId?.name || '',
-      Status: user.statusId?.name || '',
-      Centre: user.centreId?.name || '',
-      Languages: user.languageIds?.map(lang => lang.name).join(', ') || '',
-      Qualification: user.qualification,
-      'Created At': new Date(user.createdAt).toLocaleDateString()
-    })));
+      'Designation': user.designation,
+      'Role': user.roleId?.name || '',
+      'Status': user.statusId?.name || '',
+      'Centre': user.centreId?.name || '',
+      'Languages': user.languageIds?.map(lang => lang.name).join(', ') || '',
+      'Qualification': user.qualification,
+      'Created': user.createdAt
+    }));
     
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Users');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    
-    res.setHeader('Content-Disposition', 'attachment; filename=users.xlsx');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
+    console.log('Sending CSV data:', csvData.length, 'records');
+    res.json(csvData);
   } catch (error) {
+    console.error('Users export error:', error);
     res.status(500).json({ error: error.message });
   }
 });

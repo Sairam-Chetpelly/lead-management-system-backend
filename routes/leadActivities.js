@@ -3,22 +3,88 @@ const router = express.Router();
 const LeadActivity = require('../models/LeadActivity');
 const { authenticateToken } = require('../middleware/auth');
 
-// GET all lead activities
-router.get('/', async (req, res) => {
+// GET export lead activities
+router.get('/export', async (req, res) => {
   try {
     const leadActivities = await LeadActivity.find({ deletedAt: null })
       .populate('leadId', 'name')
       .populate('presalesUserId', 'name')
       .populate('salesUserId', 'name')
-      .populate('updatedPerson', 'name')
       .populate('leadStatusId', 'name')
-      .populate('leadSubStatusId', 'name')
-      .populate('languageId', 'name')
       .populate('sourceId', 'name')
-      .populate('projectTypeId', 'name')
-      .populate('houseTypeId', 'name')
-      .populate('centerId', 'name');
-    res.json(leadActivities);
+      .sort({ createdAt: -1 });
+    
+    const csvData = leadActivities.map(activity => ({
+      'Lead': activity.leadId?.name || '',
+      'Name': activity.name || '',
+      'Email': activity.email || '',
+      'Contact': activity.contactNumber || '',
+      'Lead Value': activity.leadValue || '',
+      'Payment Method': activity.paymentMethod || '',
+      'Site Visit': activity.siteVisit ? 'Yes' : 'No',
+      'Center Visit': activity.centerVisit ? 'Yes' : 'No',
+      'Virtual Meeting': activity.virtualMeeting ? 'Yes' : 'No',
+      'Completed': activity.isCompleted ? 'Yes' : 'No',
+      'Created': activity.createdAt
+    }));
+    
+    res.json(csvData);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// GET all lead activities with pagination and filtering
+router.get('/', async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '', leadValue = '', isCompleted = '' } = req.query;
+    
+    const filter = { deletedAt: null };
+    
+    if (leadValue) filter.leadValue = leadValue;
+    if (isCompleted !== '') filter.isCompleted = isCompleted === 'true';
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const [leadActivities, total] = await Promise.all([
+      LeadActivity.find(filter)
+        .populate('leadId', 'name')
+        .populate('presalesUserId', 'name')
+        .populate('salesUserId', 'name')
+        .populate('updatedPerson', 'name')
+        .populate('leadStatusId', 'name')
+        .populate('leadSubStatusId', 'name')
+        .populate('languageId', 'name')
+        .populate('sourceId', 'name')
+        .populate('projectTypeId', 'name')
+        .populate('houseTypeId', 'name')
+        .populate('centerId', 'name')
+        .skip(skip)
+        .limit(parseInt(limit))
+        .sort({ createdAt: -1 }),
+      LeadActivity.countDocuments(filter)
+    ]);
+    
+    // Apply search filter after population
+    let filteredActivities = leadActivities;
+    if (search) {
+      filteredActivities = leadActivities.filter(activity => 
+        (activity.name && activity.name.toLowerCase().includes(search.toLowerCase())) ||
+        (activity.email && activity.email.toLowerCase().includes(search.toLowerCase())) ||
+        (activity.contactNumber && activity.contactNumber.includes(search)) ||
+        (activity.leadId?.name && activity.leadId.name.toLowerCase().includes(search.toLowerCase()))
+      );
+    }
+    
+    res.json({
+      data: filteredActivities,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        total,
+        limit: parseInt(limit)
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -3,18 +3,88 @@ const router = express.Router();
 const Lead = require('../models/Lead');
 const LeadActivity = require('../models/LeadActivity');
 const CallLog = require('../models/CallLog');
+const LeadWorkflowService = require('../services/leadWorkflowService');
 const { authenticateToken } = require('../middleware/auth');
 
-// GET all leads
-router.get('/', authenticateToken, async (req, res) => {
+// GET export leads
+router.get('/export', authenticateToken, async (req, res) => {
   try {
     const leads = await Lead.find({ deletedAt: null })
       .populate('sourceId', 'name')
       .populate('salesUserId', 'name')
       .populate('presalesUserId', 'name')
       .populate('leadStatusId', 'name')
-      .populate('centerId', 'name');
-    res.json(leads);
+      .populate('centerId', 'name')
+      .sort({ createdAt: -1 });
+    
+    const csvData = leads.map(lead => ({
+      'Lead ID': lead.leadId || '',
+      'Name': lead.name,
+      'Email': lead.email,
+      'Contact': lead.contactNumber,
+      'Source': lead.sourceId?.name || '',
+      'Status': lead.leadStatusId?.name || '',
+      'Sales User': lead.salesUserId?.name || '',
+      'Presales User': lead.presalesUserId?.name || '',
+      'Centre': lead.centerId?.name || '',
+      'Created': lead.createdAt
+    }));
+    
+    res.json(csvData);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// GET all leads with pagination and filtering
+router.get('/', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '', source = '', status = '', assignedTo = '' } = req.query;
+    
+    const filter = { deletedAt: null };
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { contactNumber: { $regex: search, $options: 'i' } },
+        { leadId: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (source) filter.sourceId = source;
+    if (status) filter.leadStatusId = status;
+    if (assignedTo) {
+      filter.$or = [
+        { salesUserId: assignedTo },
+        { presalesUserId: assignedTo }
+      ];
+    }
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const [leads, total] = await Promise.all([
+      Lead.find(filter)
+        .populate('sourceId', 'name')
+        .populate('salesUserId', 'name')
+        .populate('presalesUserId', 'name')
+        .populate('leadStatusId', 'name')
+        .populate('centerId', 'name')
+        .skip(skip)
+        .limit(parseInt(limit))
+        .sort({ createdAt: -1 }),
+      Lead.countDocuments(filter)
+    ]);
+    
+    res.json({
+      data: leads,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        total,
+        limit: parseInt(limit)
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -80,30 +150,110 @@ router.get('/:id/details', async (req, res) => {
   }
 });
 
-// POST create new lead
+// POST create new lead with workflow
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const lead = new Lead(req.body);
-    const savedLead = await lead.save();
-    
-    // Create initial lead activity
-    const leadActivity = new LeadActivity({
-      leadId: savedLead._id,
-      name: savedLead.name,
-      email: savedLead.email,
-      contactNumber: savedLead.contactNumber,
-      sourceId: savedLead.sourceId,
-      presalesUserId: savedLead.presalesUserId,
-      salesUserId: savedLead.salesUserId,
-      leadStatusId: savedLead.leadStatusId,
-      centerId: savedLead.centerId,
-      updatedPerson: req.user.userId
-    });
-    await leadActivity.save();
-    
-    res.status(201).json(savedLead);
+    const { assignmentType = 'manual_upload', ...leadData } = req.body;
+    const lead = await LeadWorkflowService.createAndAssignLead(
+      leadData, 
+      assignmentType, 
+      req.user.userId
+    );
+    res.status(201).json(lead);
   } catch (error) {
     res.status(400).json({ message: error.message });
+  }
+});
+
+// POST workflow: Language evaluation
+router.post('/:id/evaluate-language', authenticateToken, async (req, res) => {
+  try {
+    const { isComfortable, languageId, centerId, leadValue } = req.body;
+    const result = await LeadWorkflowService.evaluateLanguageComfort(
+      req.params.id,
+      isComfortable,
+      languageId,
+      centerId,
+      leadValue,
+      req.user.userId
+    );
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// POST workflow: Qualify lead
+router.post('/:id/qualify', authenticateToken, async (req, res) => {
+  try {
+    const { isQualified } = req.body;
+    const result = await LeadWorkflowService.qualifyLead(
+      req.params.id,
+      isQualified,
+      req.user.userId
+    );
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// POST workflow: Site visit
+router.post('/:id/site-visit', authenticateToken, async (req, res) => {
+  try {
+    const { siteVisit, siteVisitDate } = req.body;
+    await LeadWorkflowService.processSiteVisit(
+      req.params.id,
+      siteVisit,
+      siteVisitDate,
+      req.user.userId
+    );
+    res.json({ message: 'Site visit updated successfully' });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// POST workflow: Selection centre
+router.post('/:id/selection-centre', authenticateToken, async (req, res) => {
+  try {
+    const { centerVisit, centerVisitDate, virtualMeeting, virtualMeetingDate } = req.body;
+    await LeadWorkflowService.processSelectionCentre(
+      req.params.id,
+      centerVisit,
+      centerVisitDate,
+      virtualMeeting,
+      virtualMeetingDate,
+      req.user.userId
+    );
+    res.json({ message: 'Selection centre updated successfully' });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// POST workflow: Final outcome
+router.post('/:id/outcome', authenticateToken, async (req, res) => {
+  try {
+    const { outcome } = req.body;
+    await LeadWorkflowService.processFinalOutcome(
+      req.params.id,
+      outcome,
+      req.user.userId
+    );
+    res.json({ message: 'Lead outcome updated successfully' });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// GET workflow status
+router.get('/:id/workflow', authenticateToken, async (req, res) => {
+  try {
+    const result = await LeadWorkflowService.getWorkflowStatus(req.params.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 });
 
@@ -120,20 +270,11 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
     
     // Create lead activity for the update
-    const leadActivity = new LeadActivity({
-      leadId: lead._id,
-      name: lead.name,
-      email: lead.email,
-      contactNumber: lead.contactNumber,
-      sourceId: lead.sourceId,
-      presalesUserId: lead.presalesUserId,
-      salesUserId: lead.salesUserId,
-      leadStatusId: lead.leadStatusId,
-      centerId: lead.centerId,
-      updatedPerson: req.user.userId,
-      notes: 'Lead information updated'
-    });
-    await leadActivity.save();
+    await LeadWorkflowService.createActivity(
+      lead._id,
+      req.user.userId,
+      'Lead information updated'
+    );
     
     res.json(lead);
   } catch (error) {

@@ -2,11 +2,60 @@ const express = require('express');
 const router = express.Router();
 const ProjectAndHouseType = require('../models/ProjectAndHouseType');
 
-// GET all project and house types
+// GET export project and house types
+router.get('/export', async (req, res) => {
+  try {
+    const types = await ProjectAndHouseType.find({ deletedAt: null })
+      .sort({ createdAt: -1 });
+    
+    const csvData = types.map(type => ({
+      'Name': type.name,
+      'Type': type.type,
+      'Description': type.description,
+      'Created': type.createdAt
+    }));
+    
+    res.json(csvData);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// GET all project and house types with pagination and filtering
 router.get('/', async (req, res) => {
   try {
-    const types = await ProjectAndHouseType.find({ deletedAt: null });
-    res.json(types);
+    const { page = 1, limit = 10, search = '', type = '' } = req.query;
+    
+    const filter = { deletedAt: null };
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (type) filter.type = type;
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const [types, total] = await Promise.all([
+      ProjectAndHouseType.find(filter)
+        .skip(skip)
+        .limit(parseInt(limit))
+        .sort({ createdAt: -1 }),
+      ProjectAndHouseType.countDocuments(filter)
+    ]);
+    
+    res.json({
+      data: types,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        total,
+        limit: parseInt(limit)
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
