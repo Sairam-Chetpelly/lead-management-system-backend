@@ -1,11 +1,6 @@
 const mongoose = require('mongoose');
 
-const statusSchema = new mongoose.Schema({
-  type: {
-    type: String,
-    enum: ['status', 'leadStatus', 'leadSubStatus'],
-    required: true
-  },
+const leadSourceSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true
@@ -19,6 +14,11 @@ const statusSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  isApiSource: {
+    type: Boolean,
+    required: true,
+    default: false
+  },
   deletedAt: {
     type: Date,
     default: null
@@ -27,4 +27,4 @@ const statusSchema = new mongoose.Schema({
   timestamps: true
 });
 
-module.exports = mongoose.model('Status', statusSchema);
+module.exports = mongoose.model('LeadSource', leadSourceSchema);

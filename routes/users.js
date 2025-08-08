@@ -5,11 +5,11 @@ const User = require('../models/User');
 const Role = require('../models/Role');
 const Status = require('../models/Status');
 const Centre = require('../models/Centre');
-const { auth, adminOnly } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
 // Get all users with pagination and filtering (Admin only)
-router.get('/', auth, adminOnly, async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '', role = '', status = '', centre = '' } = req.query;
     
@@ -59,7 +59,7 @@ router.get('/', auth, adminOnly, async (req, res) => {
 });
 
 // Create user (Admin only)
-router.post('/', auth, adminOnly, [
+router.post('/', authenticateToken, [
   body('name').notEmpty().withMessage('Name is required'),
   body('email').isEmail().withMessage('Please provide a valid email'),
   body('mobileNumber').notEmpty().withMessage('Mobile number is required'),
@@ -100,7 +100,7 @@ router.post('/', auth, adminOnly, [
 });
 
 // Update user (Admin only)
-router.put('/:id', auth, adminOnly, async (req, res) => {
+router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const updateData = { ...req.body };
     
@@ -131,7 +131,7 @@ router.put('/:id', auth, adminOnly, async (req, res) => {
 });
 
 // Delete user (Admin only)
-router.delete('/:id', auth, adminOnly, async (req, res) => {
+router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const user = await User.findByIdAndUpdate(
       req.params.id,
@@ -150,7 +150,7 @@ router.delete('/:id', auth, adminOnly, async (req, res) => {
 });
 
 // Excel Export Route
-router.get('/export', auth, adminOnly, async (req, res) => {
+router.get('/export', authenticateToken, async (req, res) => {
   try {
     const users = await User.find({ deletedAt: null })
       .populate('roleId', 'name')

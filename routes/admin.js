@@ -5,11 +5,11 @@ const Role = require('../models/Role');
 const Centre = require('../models/Centre');
 const Language = require('../models/Language');
 const Status = require('../models/Status');
-const { auth, adminOnly } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
 // Get all items for dropdowns (without pagination)
-router.get('/roles/all', auth, adminOnly, async (req, res) => {
+router.get('/roles/all', authenticateToken, async (req, res) => {
   try {
     const roles = await Role.find({ deletedAt: null }).select('_id name slug');
     res.json({ data: roles });
@@ -18,7 +18,7 @@ router.get('/roles/all', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.get('/centres/all', auth, adminOnly, async (req, res) => {
+router.get('/centres/all', authenticateToken, async (req, res) => {
   try {
     const centres = await Centre.find({ deletedAt: null }).select('_id name slug');
     res.json({ data: centres });
@@ -27,7 +27,7 @@ router.get('/centres/all', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.get('/languages/all', auth, adminOnly, async (req, res) => {
+router.get('/languages/all', authenticateToken, async (req, res) => {
   try {
     const languages = await Language.find({ deletedAt: null }).select('_id name slug code');
     res.json({ data: languages });
@@ -36,7 +36,7 @@ router.get('/languages/all', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.get('/statuses/all', auth, adminOnly, async (req, res) => {
+router.get('/statuses/all', authenticateToken, async (req, res) => {
   try {
     const statuses = await Status.find({ deletedAt: null }).select('_id name slug');
     res.json({ data: statuses });
@@ -46,7 +46,7 @@ router.get('/statuses/all', auth, adminOnly, async (req, res) => {
 });
 
 // Roles CRUD with pagination
-router.get('/roles', auth, adminOnly, async (req, res) => {
+router.get('/roles', authenticateToken, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
     
@@ -79,7 +79,7 @@ router.get('/roles', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.post('/roles', auth, adminOnly, [
+router.post('/roles', authenticateToken, [
   body('name').notEmpty().withMessage('Name is required'),
   body('slug').notEmpty().withMessage('Slug is required')
 ], async (req, res) => {
@@ -96,7 +96,7 @@ router.post('/roles', auth, adminOnly, [
   }
 });
 
-router.put('/roles/:id', auth, adminOnly, async (req, res) => {
+router.put('/roles/:id', authenticateToken, async (req, res) => {
   try {
     const role = await Role.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(role);
@@ -105,7 +105,7 @@ router.put('/roles/:id', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.delete('/roles/:id', auth, adminOnly, async (req, res) => {
+router.delete('/roles/:id', authenticateToken, async (req, res) => {
   try {
     await Role.findByIdAndUpdate(req.params.id, { deletedAt: new Date() });
     res.json({ message: 'Role deleted' });
@@ -115,7 +115,7 @@ router.delete('/roles/:id', auth, adminOnly, async (req, res) => {
 });
 
 // Centres CRUD with pagination
-router.get('/centres', auth, adminOnly, async (req, res) => {
+router.get('/centres', authenticateToken, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
     
@@ -148,7 +148,7 @@ router.get('/centres', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.post('/centres', auth, adminOnly, [
+router.post('/centres', authenticateToken, [
   body('name').notEmpty().withMessage('Name is required'),
   body('slug').notEmpty().withMessage('Slug is required')
 ], async (req, res) => {
@@ -165,7 +165,7 @@ router.post('/centres', auth, adminOnly, [
   }
 });
 
-router.put('/centres/:id', auth, adminOnly, async (req, res) => {
+router.put('/centres/:id', authenticateToken, async (req, res) => {
   try {
     const centre = await Centre.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(centre);
@@ -174,7 +174,7 @@ router.put('/centres/:id', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.delete('/centres/:id', auth, adminOnly, async (req, res) => {
+router.delete('/centres/:id', authenticateToken, async (req, res) => {
   try {
     await Centre.findByIdAndUpdate(req.params.id, { deletedAt: new Date() });
     res.json({ message: 'Centre deleted' });
@@ -184,7 +184,7 @@ router.delete('/centres/:id', auth, adminOnly, async (req, res) => {
 });
 
 // Languages CRUD with pagination
-router.get('/languages', auth, adminOnly, async (req, res) => {
+router.get('/languages', authenticateToken, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
     
@@ -218,7 +218,7 @@ router.get('/languages', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.post('/languages', auth, adminOnly, [
+router.post('/languages', authenticateToken, [
   body('name').notEmpty().withMessage('Name is required'),
   body('slug').notEmpty().withMessage('Slug is required'),
   body('code').notEmpty().withMessage('Code is required')
@@ -236,7 +236,7 @@ router.post('/languages', auth, adminOnly, [
   }
 });
 
-router.put('/languages/:id', auth, adminOnly, async (req, res) => {
+router.put('/languages/:id', authenticateToken, async (req, res) => {
   try {
     const language = await Language.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(language);
@@ -245,7 +245,7 @@ router.put('/languages/:id', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.delete('/languages/:id', auth, adminOnly, async (req, res) => {
+router.delete('/languages/:id', authenticateToken, async (req, res) => {
   try {
     await Language.findByIdAndUpdate(req.params.id, { deletedAt: new Date() });
     res.json({ message: 'Language deleted' });
@@ -255,7 +255,7 @@ router.delete('/languages/:id', auth, adminOnly, async (req, res) => {
 });
 
 // Statuses CRUD with pagination
-router.get('/statuses', auth, adminOnly, async (req, res) => {
+router.get('/statuses', authenticateToken, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
     
@@ -288,7 +288,7 @@ router.get('/statuses', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.post('/statuses', auth, adminOnly, [
+router.post('/statuses', authenticateToken, [
   body('name').notEmpty().withMessage('Name is required'),
   body('slug').notEmpty().withMessage('Slug is required')
 ], async (req, res) => {
@@ -305,7 +305,7 @@ router.post('/statuses', auth, adminOnly, [
   }
 });
 
-router.put('/statuses/:id', auth, adminOnly, async (req, res) => {
+router.put('/statuses/:id', authenticateToken, async (req, res) => {
   try {
     const status = await Status.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(status);
@@ -314,7 +314,7 @@ router.put('/statuses/:id', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.delete('/statuses/:id', auth, adminOnly, async (req, res) => {
+router.delete('/statuses/:id', authenticateToken, async (req, res) => {
   try {
     await Status.findByIdAndUpdate(req.params.id, { deletedAt: new Date() });
     res.json({ message: 'Status deleted' });
@@ -324,7 +324,7 @@ router.delete('/statuses/:id', auth, adminOnly, async (req, res) => {
 });
 
 // Excel Export Routes
-router.get('/roles/export', auth, adminOnly, async (req, res) => {
+router.get('/roles/export', authenticateToken, async (req, res) => {
   try {
     const roles = await Role.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
     const worksheet = XLSX.utils.json_to_sheet(roles.map(role => ({
@@ -343,7 +343,7 @@ router.get('/roles/export', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.get('/centres/export', auth, adminOnly, async (req, res) => {
+router.get('/centres/export', authenticateToken, async (req, res) => {
   try {
     const centres = await Centre.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
     const worksheet = XLSX.utils.json_to_sheet(centres.map(centre => ({
@@ -362,7 +362,7 @@ router.get('/centres/export', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.get('/languages/export', auth, adminOnly, async (req, res) => {
+router.get('/languages/export', authenticateToken, async (req, res) => {
   try {
     const languages = await Language.find({ deletedAt: null }).select('name slug code createdAt').sort({ createdAt: -1 });
     const worksheet = XLSX.utils.json_to_sheet(languages.map(language => ({
@@ -382,7 +382,7 @@ router.get('/languages/export', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.get('/statuses/export', auth, adminOnly, async (req, res) => {
+router.get('/statuses/export', authenticateToken, async (req, res) => {
   try {
     const statuses = await Status.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
     const worksheet = XLSX.utils.json_to_sheet(statuses.map(status => ({
@@ -402,7 +402,7 @@ router.get('/statuses/export', auth, adminOnly, async (req, res) => {
 });
 
 // Excel Export Routes
-router.get('/roles/export', auth, adminOnly, async (req, res) => {
+router.get('/roles/export', authenticateToken, async (req, res) => {
   try {
     const roles = await Role.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
     const worksheet = XLSX.utils.json_to_sheet(roles.map(role => ({
@@ -421,7 +421,7 @@ router.get('/roles/export', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.get('/centres/export', auth, adminOnly, async (req, res) => {
+router.get('/centres/export', authenticateToken, async (req, res) => {
   try {
     const centres = await Centre.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
     const worksheet = XLSX.utils.json_to_sheet(centres.map(centre => ({
@@ -440,7 +440,7 @@ router.get('/centres/export', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.get('/languages/export', auth, adminOnly, async (req, res) => {
+router.get('/languages/export', authenticateToken, async (req, res) => {
   try {
     const languages = await Language.find({ deletedAt: null }).select('name slug code createdAt').sort({ createdAt: -1 });
     const worksheet = XLSX.utils.json_to_sheet(languages.map(language => ({
@@ -460,7 +460,7 @@ router.get('/languages/export', auth, adminOnly, async (req, res) => {
   }
 });
 
-router.get('/statuses/export', auth, adminOnly, async (req, res) => {
+router.get('/statuses/export', authenticateToken, async (req, res) => {
   try {
     const statuses = await Status.find({ deletedAt: null }).select('name slug createdAt').sort({ createdAt: -1 });
     const worksheet = XLSX.utils.json_to_sheet(statuses.map(status => ({

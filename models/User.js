@@ -2,6 +2,10 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
+  userId: {
+    type: String,
+    unique: true
+  },
   name: {
     type: String,
     required: true
@@ -66,6 +70,10 @@ const userSchema = new mongoose.Schema({
 });
 
 userSchema.pre('save', async function(next) {
+  if (!this.userId) {
+    const count = await mongoose.model('User').countDocuments();
+    this.userId = `USR${String(count + 1).padStart(6, '0')}`;
+  }
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();

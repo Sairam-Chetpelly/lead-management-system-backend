@@ -1,19 +1,14 @@
 const mongoose = require('mongoose');
 
-const statusSchema = new mongoose.Schema({
-  type: {
-    type: String,
-    enum: ['status', 'leadStatus', 'leadSubStatus'],
-    required: true
-  },
+const projectAndHouseTypeSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true
   },
-  slug: {
+  type: {
     type: String,
-    required: true,
-    unique: true
+    enum: ['project', 'house'],
+    required: true
   },
   description: {
     type: String,
@@ -27,4 +22,4 @@ const statusSchema = new mongoose.Schema({
   timestamps: true
 });
 
-module.exports = mongoose.model('Status', statusSchema);
+module.exports = mongoose.model('ProjectAndHouseType', projectAndHouseTypeSchema);
