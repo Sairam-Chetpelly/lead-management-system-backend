@@ -3,7 +3,6 @@ const router = express.Router();
 const Lead = require('../models/Lead');
 const LeadActivity = require('../models/LeadActivity');
 const CallLog = require('../models/CallLog');
-const LeadWorkflowService = require('../services/leadWorkflowService');
 const { authenticateToken } = require('../middleware/auth');
 
 // GET export leads
@@ -150,112 +149,18 @@ router.get('/:id/details', async (req, res) => {
   }
 });
 
-// POST create new lead with workflow
+// POST create new lead
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { assignmentType = 'manual_upload', ...leadData } = req.body;
-    const lead = await LeadWorkflowService.createAndAssignLead(
-      leadData, 
-      assignmentType, 
-      req.user.userId
-    );
-    res.status(201).json(lead);
+    const lead = new Lead(req.body);
+    const savedLead = await lead.save();
+    res.status(201).json(savedLead);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
 });
 
-// POST workflow: Language evaluation
-router.post('/:id/evaluate-language', authenticateToken, async (req, res) => {
-  try {
-    const { isComfortable, languageId, centerId, leadValue } = req.body;
-    const result = await LeadWorkflowService.evaluateLanguageComfort(
-      req.params.id,
-      isComfortable,
-      languageId,
-      centerId,
-      leadValue,
-      req.user.userId
-    );
-    res.json(result);
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-});
 
-// POST workflow: Qualify lead
-router.post('/:id/qualify', authenticateToken, async (req, res) => {
-  try {
-    const { isQualified } = req.body;
-    const result = await LeadWorkflowService.qualifyLead(
-      req.params.id,
-      isQualified,
-      req.user.userId
-    );
-    res.json(result);
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-});
-
-// POST workflow: Site visit
-router.post('/:id/site-visit', authenticateToken, async (req, res) => {
-  try {
-    const { siteVisit, siteVisitDate } = req.body;
-    await LeadWorkflowService.processSiteVisit(
-      req.params.id,
-      siteVisit,
-      siteVisitDate,
-      req.user.userId
-    );
-    res.json({ message: 'Site visit updated successfully' });
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-});
-
-// POST workflow: Selection centre
-router.post('/:id/selection-centre', authenticateToken, async (req, res) => {
-  try {
-    const { centerVisit, centerVisitDate, virtualMeeting, virtualMeetingDate } = req.body;
-    await LeadWorkflowService.processSelectionCentre(
-      req.params.id,
-      centerVisit,
-      centerVisitDate,
-      virtualMeeting,
-      virtualMeetingDate,
-      req.user.userId
-    );
-    res.json({ message: 'Selection centre updated successfully' });
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-});
-
-// POST workflow: Final outcome
-router.post('/:id/outcome', authenticateToken, async (req, res) => {
-  try {
-    const { outcome } = req.body;
-    await LeadWorkflowService.processFinalOutcome(
-      req.params.id,
-      outcome,
-      req.user.userId
-    );
-    res.json({ message: 'Lead outcome updated successfully' });
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-});
-
-// GET workflow status
-router.get('/:id/workflow', authenticateToken, async (req, res) => {
-  try {
-    const result = await LeadWorkflowService.getWorkflowStatus(req.params.id);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
 
 // PUT update lead
 router.put('/:id', authenticateToken, async (req, res) => {
@@ -268,13 +173,6 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (!lead || lead.deletedAt) {
       return res.status(404).json({ message: 'Lead not found' });
     }
-    
-    // Create lead activity for the update
-    await LeadWorkflowService.createActivity(
-      lead._id,
-      req.user.userId,
-      'Lead information updated'
-    );
     
     res.json(lead);
   } catch (error) {

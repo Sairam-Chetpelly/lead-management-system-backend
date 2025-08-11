@@ -73,12 +73,14 @@ const leadSchema = new mongoose.Schema({
   salesUserId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    default: null,
+    set: v => v === "" ? null : v
   },
   presalesUserId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    default: null,
+    set: v => v === "" ? null : v
   },
   leadStatusId: {
     type: mongoose.Schema.Types.ObjectId,
