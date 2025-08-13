@@ -6,47 +6,32 @@ const leadActivitySchema = new mongoose.Schema({
     ref: 'Lead',
     required: true
   },
-  name: {
-    type: String,
-    default: null
+  updatedPerson: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   },
-  email: {
-    type: String,
-    default: null
-  },
-  contactNumber: {
-    type: String,
-    default: null
-  },
+  name: String,
+  email: String,
+  contactNumber: String,
   presalesUserId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    default: null
+    ref: 'User'
   },
   salesUserId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    default: null
-  },
-  updatedPerson: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    default: null
+    ref: 'User'
   },
   leadStatusId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Status',
-    default: null
+    ref: 'Status'
   },
   leadSubStatusId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Status',
-    default: null
+    ref: 'Status'
   },
   languageId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Language',
-    default: null
+    ref: 'Language'
   },
   sourceId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -55,76 +40,35 @@ const leadActivitySchema = new mongoose.Schema({
   },
   projectTypeId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'ProjectAndHouseType',
-    default: null
+    ref: 'ProjectAndHouseType'
   },
-  projectValue: {
-    type: String,
-    default: null
-  },
-  apartmentName: {
-    type: String,
-    default: null
-  },
+  projectValue: String,
+  apartmentName: String,
   houseTypeId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'ProjectAndHouseType',
-    default: null
+    ref: 'ProjectAndHouseType'
   },
-  expectedPossessionDate: {
-    type: Date,
-    default: null
-  },
+  expectedPossessionDate: Date,
   leadValue: {
     type: String,
-    enum: ['high value', 'medium value', 'low value'],
-    default: null
+    enum: ['high', 'low']
   },
   paymentMethod: {
     type: String,
-    enum: ['cod', 'upi', 'debit card', 'credit card', 'emi', 'cheque', 'loan'],
-    default: null
+    enum: ['cod', 'upi', 'debit card', 'credit card', 'emi', 'cheque', 'loan']
   },
-  siteVisit: {
-    type: Boolean,
-    default: null
-  },
-  siteVisitDate: {
-    type: Date,
-    default: null
-  },
-  centerVisit: {
-    type: Boolean,
-    default: null
-  },
-  centerVisitDate: {
-    type: Date,
-    default: null
-  },
-  virtualMeeting: {
-    type: Boolean,
-    default: null
-  },
-  virtualMeetingDate: {
-    type: Date,
-    default: null
-  },
-  isCompleted: {
-    type: Boolean,
-    default: null
-  },
-  isCompletedDate: {
-    type: Date,
-    default: null
-  },
-  notes: {
-    type: String,
-    default: null
-  },
+  siteVisit: Boolean,
+  siteVisitDate: Date,
+  centerVisit: Boolean,
+  centerVisitDate: Date,
+  virtualMeeting: Boolean,
+  virtualMeetingDate: Date,
+  isCompleted: Boolean,
+  isCompletedDate: Date,
+  notes: String,
   centerId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Centre',
-    default: null
+    ref: 'Centre'
   },
   deletedAt: {
     type: Date,

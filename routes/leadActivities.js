@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const LeadActivity = require('../models/LeadActivity');
-const { authenticateToken } = require('../middleware/auth');
 
 // GET export lead activities
 router.get('/export', async (req, res) => {
@@ -160,40 +159,31 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST create new lead activity
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', async (req, res) => {
   try {
-    const leadActivityData = {
-      ...req.body,
-      updatedPerson: req.user.userId
-    };
-    
-    // Convert empty strings to null for ObjectId fields
-    const objectIdFields = ['presalesUserId', 'salesUserId', 'leadSubStatusId', 'languageId', 'projectTypeId', 'houseTypeId', 'centerId'];
-    objectIdFields.forEach(field => {
-      if (leadActivityData[field] === '') {
-        leadActivityData[field] = null;
+    // Clean empty strings and null values
+    const cleanData = { ...req.body };
+    Object.keys(cleanData).forEach(key => {
+      if (cleanData[key] === '' || cleanData[key] === null || cleanData[key] === undefined) {
+        delete cleanData[key];
       }
     });
     
-    const leadActivity = new LeadActivity(leadActivityData);
+    const leadActivity = new LeadActivity(cleanData);
     const savedLeadActivity = await leadActivity.save();
     
-    // Update lead with matching fields
-    const Lead = require('../models/Lead');
-    const updateData = {};
-    if (leadActivityData.name) updateData.name = leadActivityData.name;
-    if (leadActivityData.email) updateData.email = leadActivityData.email;
-    if (leadActivityData.contactNumber) updateData.contactNumber = leadActivityData.contactNumber;
-    if (leadActivityData.presalesUserId) updateData.presalesUserId = leadActivityData.presalesUserId;
-    if (leadActivityData.salesUserId) updateData.salesUserId = leadActivityData.salesUserId;
-    if (leadActivityData.leadStatusId) updateData.leadStatusId = leadActivityData.leadStatusId;
-    if (leadActivityData.sourceId) updateData.sourceId = leadActivityData.sourceId;
-    if (leadActivityData.centerId) updateData.centerId = leadActivityData.centerId;
+    const populatedActivity = await LeadActivity.findById(savedLeadActivity._id)
+      .populate('updatedPerson', 'name')
+      .populate('presalesUserId', 'name')
+      .populate('salesUserId', 'name')
+      .populate('leadStatusId', 'name')
+      .populate('languageId', 'name')
+      .populate('sourceId', 'name')
+      .populate('centerId', 'name');
     
-    await Lead.findByIdAndUpdate(leadActivityData.leadId, updateData);
-    
-    res.status(201).json(savedLeadActivity);
+    res.status(201).json(populatedActivity);
   } catch (error) {
+    console.error('Lead activity creation error:', error);
     res.status(400).json({ message: error.message });
   }
 });

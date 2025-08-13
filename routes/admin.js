@@ -5,6 +5,7 @@ const Role = require('../models/Role');
 const Centre = require('../models/Centre');
 const Language = require('../models/Language');
 const Status = require('../models/Status');
+const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
@@ -40,6 +41,46 @@ router.get('/statuses/all', authenticateToken, async (req, res) => {
   try {
     const statuses = await Status.find({ deletedAt: null }).select('_id name slug type');
     res.json({ data: statuses });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Users endpoint for admin
+router.get('/users', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '' } = req.query;
+    
+    const filter = { deletedAt: null };
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .populate('roleId', 'name slug')
+        .populate('statusId', 'name slug')
+        .populate('centreId', 'name slug')
+        .skip(skip)
+        .limit(parseInt(limit))
+        .sort({ createdAt: -1 }),
+      User.countDocuments(filter)
+    ]);
+    
+    res.json({
+      data: users,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        total,
+        limit: parseInt(limit)
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

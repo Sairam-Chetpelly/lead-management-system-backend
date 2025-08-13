@@ -9,88 +9,67 @@ const leadSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  contactNumber: {
-    type: String,
-    required: true
-  },
   email: {
     type: String,
     required: true
   },
-  alternateContactNumber: {
+  contactNumber: {
     type: String,
-    default: null
-  },
-  address: {
-    type: String,
-    default: null
-  },
-  city: {
-    type: String,
-    default: null
-  },
-  state: {
-    type: String,
-    default: null
-  },
-  pincode: {
-    type: String,
-    default: null
-  },
-  occupation: {
-    type: String,
-    default: null
-  },
-  company: {
-    type: String,
-    default: null
-  },
-  designation: {
-    type: String,
-    default: null
-  },
-  annualIncome: {
-    type: String,
-    default: null
-  },
-  leadSource: {
-    type: String,
-    default: null
-  },
-  referredBy: {
-    type: String,
-    default: null
-  },
-  notes: {
-    type: String,
-    default: null
+    required: true
   },
   sourceId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'LeadSource',
     required: true
   },
-  salesUserId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    default: null,
-    set: v => v === "" ? null : v
-  },
-  presalesUserId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    default: null,
-    set: v => v === "" ? null : v
-  },
   leadStatusId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Status',
     required: true
   },
+  languageId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Language',
+    required: true
+  },
   centerId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Centre',
+    ref: 'Centre'
+  },
+  assignmentType: {
+    type: String,
+    enum: ['auto', 'manual'],
     default: null
+  },
+  presalesUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+    set: v => v === '' ? null : v
+  },
+  salesUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+    set: v => v === '' ? null : v
+  },
+  leadSubstatus: {
+    type: String,
+    enum: ['hot', 'warm', 'cif']
+  },
+  cifDateTime: {
+    type: Date
+  },
+  leadValue: {
+    type: String,
+    enum: ['high_value', 'low_value']
+  },
+  nextCallDateTime: {
+    type: Date
+  },
+  isQualified: {
+    type: Boolean,
+    default: false
   },
   deletedAt: {
     type: Date,
@@ -102,8 +81,13 @@ const leadSchema = new mongoose.Schema({
 
 leadSchema.pre('save', async function(next) {
   if (!this.leadId) {
-    const count = await mongoose.model('Lead').countDocuments();
-    this.leadId = `LED${String(count + 1).padStart(6, '0')}`;
+    try {
+      const count = await mongoose.model('Lead').countDocuments();
+      this.leadId = `LED${String(count + 1).padStart(6, '0')}`;
+    } catch (error) {
+      console.error('Error generating leadId:', error);
+      this.leadId = `LED${Date.now()}`;
+    }
   }
   next();
 });

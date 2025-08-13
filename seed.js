@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
 const Role = require('./models/Role');
@@ -52,8 +51,8 @@ const seedData = async () => {
       { type: 'leadStatus', name: 'Qualified', slug: 'qualified', description: 'Qualified lead' },
       { type: 'leadStatus', name: 'Won', slug: 'won', description: 'Won Lead' },
       { type: 'leadStatus', name: 'Lost', slug: 'lost', description: 'Lost lead' },
-      { type: 'leadSubStatus', name: 'Hot', slug: 'hot', description: 'Customer is most likely to get converted' }
-      { type: 'leadSubStatus', name: 'Warm', slug: 'warm', description: 'Customer is likely to get converted' }
+      { type: 'leadSubStatus', name: 'Hot', slug: 'hot', description: 'Customer is most likely to get converted' },
+      { type: 'leadSubStatus', name: 'Warm', slug: 'warm', description: 'Customer is likely to get converted' },
       { type: 'leadSubStatus', name: 'Call in Future', slug: 'cif', description: 'Call In Future - Customer may get interested in future' }
     ];
     const savedStatuses = await Status.insertMany(statuses);
@@ -86,11 +85,11 @@ const seedData = async () => {
 
     // Seed Lead Sources
     const leadSources = [
+      { name: 'Manual', slug: 'manual', description: 'Manually entered leads', isApiSource: false },
       { name: 'Website', slug: 'website', description: 'Leads from company website', isApiSource: false },
       { name: 'Facebook', slug: 'facebook', description: 'Leads from Facebook ads', isApiSource: true },
       { name: 'Google Ads', slug: 'google-ads', description: 'Leads from Google advertising', isApiSource: true },
-      { name: 'Referral', slug: 'referral', description: 'Leads from customer referrals', isApiSource: false },
-      { name: 'Walk-in', slug: 'walk-in', description: 'Walk-in customers', isApiSource: false }
+      { name: 'Referral', slug: 'referral', description: 'Leads from customer referrals', isApiSource: false }
     ];
     const savedLeadSources = await LeadSource.insertMany(leadSources);
     console.log('Lead sources seeded');
@@ -109,16 +108,15 @@ const seedData = async () => {
     console.log('Project and house types seeded');
 
     // Seed Admin User
-    const adminRole = savedRoles.find(role => role.slug === 'administrator');
+    const adminRole = savedRoles.find(role => role.slug === 'admin');
     const activeStatus = savedStatuses.find(status => status.slug === 'active' && status.type === 'status');
-    const mumbaiCentre = savedCentres.find(centre => centre.slug === 'mumbai-centre');
+    const mumbaiCentre = savedCentres.find(centre => centre.slug === 'mumbai');
     const englishLanguage = savedLanguages.find(lang => lang.code === 'en');
 
-    const hashedPassword = await bcrypt.hash('admin123', 10);
     const adminUser = new User({
       name: 'System Administrator',
       email: 'admin@lms.com',
-      password: hashedPassword,
+      password: 'admin123', // Will be hashed by pre-save middleware
       mobileNumber: '+91-9999999999',
       designation: 'System Administrator',
       roleId: adminRole._id,
