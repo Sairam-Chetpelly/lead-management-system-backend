@@ -61,6 +61,10 @@ const userSchema = new mongoose.Schema({
     enum: ['high_value', 'low_value'],
     required: true
   },
+  profileImage: {
+    type: String,
+    default: null
+  },
   deletedAt: {
     type: Date,
     default: null
