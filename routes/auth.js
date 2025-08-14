@@ -69,18 +69,26 @@ router.get('/status', async (req, res) => {
       return res.status(401).json({ error: 'User not found' });
     }
 
+    // Ensure statusId is populated
+    if (!user.statusId) {
+      return res.status(500).json({ error: 'User status not found' });
+    }
+
+    const isActive = user.statusId.slug === 'active';
+    
     res.json({
-      isActive: user.statusId.slug === 'active',
+      isActive,
       status: user.statusId.slug,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        role: user.roleId.slug,
+        role: user.roleId?.slug || 'unknown',
         status: user.statusId.slug
       }
     });
   } catch (error) {
+    console.error('Status check error:', error);
     res.status(401).json({ error: 'Invalid token' });
   }
 });
