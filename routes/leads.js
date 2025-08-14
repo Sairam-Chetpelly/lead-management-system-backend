@@ -116,12 +116,33 @@ router.post('/bulk-upload', authenticateToken, upload.single('file'), async (req
           deletedAt: null
         });
 
-        if (existingLead) {
-          results.errors.push({
-            row: rowNumber,
-            error: `Lead with email '${row.Email}' or contact '${row.ContactNumber}' already exists`
-          });
-          continue;
+        // if (existingLead) {
+        //   results.errors.push({
+        //     row: rowNumber,
+        //     error: `Lead with email '${row.Email}' or contact '${row.ContactNumber}' already exists`
+        //   });
+        //   continue;
+        // }
+
+        // Auto-assign to presales team in round-robin
+        const Role = require('../models/Role');
+        const User = require('../models/User');
+        
+        const presalesRole = await Role.findOne({ slug: 'presales_agent' });
+        let presalesUserId = null;
+        
+        if (presalesRole) {
+          const presalesUsers = await User.find({ 
+            roleId: presalesRole._id,
+            deletedAt: null
+          }).populate('statusId');
+          
+          const activePresalesUsers = presalesUsers.filter(user => user.statusId.slug === 'active');
+          if (activePresalesUsers.length > 0) {
+            const leadCount = await Lead.countDocuments();
+            const userIndex = leadCount % activePresalesUsers.length;
+            presalesUserId = activePresalesUsers[userIndex]._id;
+          }
         }
 
         // Create lead data
@@ -132,7 +153,9 @@ router.post('/bulk-upload', authenticateToken, upload.single('file'), async (req
           sourceId: source._id,
           leadStatusId: status._id,
           languageId: language._id,
-          centerId: centre ? centre._id : null
+          centerId: centre ? centre._id : null,
+          presalesUserId: presalesUserId,
+          assignmentType: presalesUserId ? 'auto' : null
         };
 
         // Create and save lead
