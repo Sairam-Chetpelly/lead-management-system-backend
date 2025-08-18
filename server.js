@@ -1,7 +1,11 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
+
+// Import middleware
+const apiKeyAuth = require('./middleware/apiKeyAuth');
 
 // Import routes at top
 const authRoutes = require('./routes/auth');
@@ -24,6 +28,24 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Rate limiting - 1000 requests per 15 minutes per IP
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // limit each IP to 1000 requests per windowMs
+  message: { error: 'Too many requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api', limiter);
+
+// API Key protection for all routes except health check
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health') {
+    return next();
+  }
+  apiKeyAuth(req, res, next);
+});
 
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI)
