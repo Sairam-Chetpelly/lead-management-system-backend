@@ -58,12 +58,13 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/lead-sources', leadSourceRoutes);
 app.use('/api/project-house-types', projectHouseTypeRoutes);
 
-const PORT = process.env.PORT || 5000;
-try {
+// For Vercel deployment
+module.exports = app;
+
+// For local development
+if (require.main === module) {
+  const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
-} catch (error) {
-  console.error('Failed to start server:', error);
-  process.exit(1);
 }
