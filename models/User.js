@@ -61,6 +61,15 @@ const userSchema = new mongoose.Schema({
     enum: ['high_value', 'low_value'],
     required: true
   },
+  userType: {
+    type: String,
+    enum: ['regular', 'cp_presales'],
+    required: function() {
+      return this.populated('roleId') ? 
+        this.roleId.slug === 'presales_agent' : 
+        false;
+    }
+  },
   profileImage: {
     type: String,
     default: null

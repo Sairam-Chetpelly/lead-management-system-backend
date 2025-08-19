@@ -96,7 +96,8 @@ router.post('/', authenticateToken, [
   body('designation').notEmpty().withMessage('Designation is required'),
   body('roleId').notEmpty().withMessage('Role is required'),
   body('statusId').notEmpty().withMessage('Status is required'),
-  body('qualification').isIn(['high_value', 'low_value']).withMessage('Invalid qualification')
+  body('qualification').isIn(['high_value', 'low_value']).withMessage('Invalid qualification'),
+  body('userType').optional().isIn(['regular', 'cp_presales']).withMessage('Invalid user type')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -246,6 +247,7 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Centre': user.centreId?.name || '',
       'Languages': user.languageIds?.map(lang => lang.name).join(', ') || '',
       'Qualification': user.qualification,
+      'User Type': user.userType || '',
       'Created': user.createdAt
     }));
     
