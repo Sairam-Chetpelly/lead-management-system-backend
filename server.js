@@ -1,20 +1,18 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
+
+// Import middleware
+const apiKeyAuth = require('./middleware/apiKeyAuth');
 
 // Import routes at top
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
-const setupRoutes = require('./routes/setup');
 const adminRoutes = require('./routes/admin');
-const leadRoutes = require('./routes/leads');
 const leadSourceRoutes = require('./routes/leadSources');
-const callLogRoutes = require('./routes/call-logs');
-const leadActivityRoutes = require('./routes/leadActivities');
 const projectHouseTypeRoutes = require('./routes/projectAndHouseTypes');
-const apiIntegrationRoutes = require('./routes/apiIntegration');
-const dashboardRoutes = require('./routes/dashboard');
 
 const app = express();
 
@@ -24,6 +22,24 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Rate limiting - 1000 requests per 15 minutes per IP
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // limit each IP to 1000 requests per windowMs
+  message: { error: 'Too many requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api', limiter);
+
+// API Key protection for all routes except health check
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health') {
+    return next();
+  }
+  apiKeyAuth(req, res, next);
+});
 
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI)
@@ -38,15 +54,9 @@ app.get('/api/health', (req, res) => {
 // Use routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/setup', setupRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/leads', leadRoutes);
 app.use('/api/lead-sources', leadSourceRoutes);
-app.use('/api/call-logs', callLogRoutes);
-app.use('/api/lead-activities', leadActivityRoutes);
 app.use('/api/project-house-types', projectHouseTypeRoutes);
-app.use('/api/integration', apiIntegrationRoutes);
-app.use('/api/dashboard', dashboardRoutes);
 
 const PORT = process.env.PORT || 5000;
 try {
