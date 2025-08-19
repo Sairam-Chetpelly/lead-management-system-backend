@@ -3,7 +3,6 @@ const { body, validationResult } = require('express-validator');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const XLSX = require('xlsx');
 const User = require('../models/User');
 const Role = require('../models/Role');
 const Status = require('../models/Status');
