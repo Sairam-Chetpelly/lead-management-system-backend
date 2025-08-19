@@ -36,8 +36,28 @@ router.post('/bulk-upload', authenticateToken, upload.single('file'), async (req
     const worksheet = workbook.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(worksheet);
 
+    console.log('Parsed Excel data:', {
+      sheetName,
+      dataLength: data.length,
+      firstRow: data[0],
+      columns: data.length > 0 ? Object.keys(data[0]) : []
+    });
+
     if (data.length === 0) {
       return res.status(400).json({ message: 'Excel file is empty' });
+    }
+
+    // Validate required columns
+    const requiredColumns = ['Name', 'Email', 'ContactNumber', 'Language'];
+    const fileColumns = Object.keys(data[0]);
+    const missingColumns = requiredColumns.filter(col => !fileColumns.includes(col));
+    
+    if (missingColumns.length > 0) {
+      return res.status(400).json({ 
+        message: `Missing required columns: ${missingColumns.join(', ')}`,
+        requiredColumns,
+        foundColumns: fileColumns
+      });
     }
 
     // Get reference data
@@ -48,86 +68,100 @@ router.post('/bulk-upload', authenticateToken, upload.single('file'), async (req
       Centre.find({ deletedAt: null })
     ]);
 
-    const results = {
-      success: [],
-      errors: []
-    };
+    const validRows = [];
+    const invalidRows = [];
 
     // Process each row
+    console.log('Starting row processing. Total rows:', data.length);
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
-      const rowNumber = i + 2; // Excel row number (accounting for header)
+      const rowNumber = i + 2;
+      let errors = [];
+      
+      console.log(`Processing row ${rowNumber}:`, row);
 
-      try {
-        // Validate required fields
-        if (!row.Name || !row.Email || !row.ContactNumber || !row.Language) {
-          results.errors.push({
-            row: rowNumber,
-            error: 'Missing required fields: Name, Email, ContactNumber, Language'
-          });
-          continue;
-        }
+      // Validate required fields
+      if (!row.Name || row.Name.toString().trim() === '') {
+        errors.push('Name is required');
+      }
+      if (!row.Email || row.Email.toString().trim() === '') {
+        errors.push('Email is required');
+      }
+      if (!row.ContactNumber || row.ContactNumber.toString().trim() === '') {
+        errors.push('ContactNumber is required');
+      }
+      if (!row.Language || row.Language.toString().trim() === '') {
+        errors.push('Language is required');
+      }
 
-        // Validate email format
+      // Validate email format
+      if (row.Email) {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(row.Email)) {
-          results.errors.push({
-            row: rowNumber,
-            error: 'Invalid email format'
-          });
-          continue;
+          errors.push('Invalid email format');
         }
+      }
 
-        // Validate contact number (should be 10 digits)
+      // Validate contact number
+      if (row.ContactNumber) {
         const contactStr = row.ContactNumber.toString().replace(/\D/g, '');
         if (contactStr.length !== 10) {
-          results.errors.push({
-            row: rowNumber,
-            error: 'Contact number must be exactly 10 digits'
-          });
-          continue;
+          errors.push('Contact number must be exactly 10 digits');
         }
+      }
 
+      // Validate language exists
+      if (row.Language) {
+        const language = languages.find(l => l.name.toLowerCase() === row.Language.toLowerCase());
+        if (!language) {
+          errors.push(`Language '${row.Language}' not found in system`);
+        }
+      }
+
+      // Validate centre if provided
+      if (row.Centre && row.Centre.toString().trim() !== '') {
+        const centre = centres.find(c => c.name.toLowerCase() === row.Centre.toLowerCase());
+        if (!centre) {
+          errors.push(`Centre '${row.Centre}' not found in system`);
+        }
+      }
+
+      if (errors.length > 0) {
+        console.log(`Row ${rowNumber} has errors:`, errors);
+        invalidRows.push({
+          ...row,
+          RowNumber: rowNumber,
+          Reason: errors.join('; ')
+        });
+      } else {
+        console.log(`Row ${rowNumber} is valid`);
+        validRows.push({ ...row, rowNumber });
+      }
+    }
+    
+    console.log('Row processing complete:', {
+      totalRows: data.length,
+      validRows: validRows.length,
+      invalidRows: invalidRows.length
+    });
+
+    // Insert valid rows into database
+    const insertedLeads = [];
+    const insertErrors = [];
+
+    for (const row of validRows) {
+      try {
         // Find reference IDs
         const source = sources.find(s => s.name.toLowerCase() === (row.Source || 'manual').toLowerCase()) || 
                       sources.find(s => s.name.toLowerCase() === 'manual');
-        
         const status = statuses.find(s => s.name.toLowerCase() === (row.Status || 'lead').toLowerCase()) || 
                       statuses.find(s => s.name.toLowerCase() === 'lead');
-        
         const language = languages.find(l => l.name.toLowerCase() === row.Language.toLowerCase());
-        
         const centre = row.Centre ? centres.find(c => c.name.toLowerCase() === row.Centre.toLowerCase()) : null;
 
-        if (!language) {
-          results.errors.push({
-            row: rowNumber,
-            error: `Language '${row.Language}' not found`
-          });
-          continue;
-        }
-
-        // Check for duplicate email or contact number
-        const existingLead = await Lead.findOne({
-          $or: [
-            { email: row.Email },
-            { contactNumber: row.ContactNumber }
-          ],
-          deletedAt: null
-        });
-
-        // if (existingLead) {
-        //   results.errors.push({
-        //     row: rowNumber,
-        //     error: `Lead with email '${row.Email}' or contact '${row.ContactNumber}' already exists`
-        //   });
-        //   continue;
-        // }
-
-        // Auto-assign to presales team in round-robin
+        // Auto-assign presales user
         const Role = require('../models/Role');
         const User = require('../models/User');
-        
         const presalesRole = await Role.findOne({ slug: 'presales_agent' });
         let presalesUserId = null;
         
@@ -145,11 +179,10 @@ router.post('/bulk-upload', authenticateToken, upload.single('file'), async (req
           }
         }
 
-        // Create lead data
         const leadData = {
           name: row.Name.trim(),
           email: row.Email.trim().toLowerCase(),
-          contactNumber: contactStr,
+          contactNumber: row.ContactNumber.toString().replace(/\D/g, ''),
           sourceId: source._id,
           leadStatusId: status._id,
           languageId: language._id,
@@ -158,29 +191,72 @@ router.post('/bulk-upload', authenticateToken, upload.single('file'), async (req
           assignmentType: presalesUserId ? 'auto' : null
         };
 
-        // Create and save lead
         const lead = new Lead(leadData);
         await lead.save();
-        
-        results.success.push({
-          row: rowNumber,
-          name: row.Name,
-          leadId: lead.leadId
-        });
+        insertedLeads.push({ row: row.rowNumber, leadId: lead.leadId, name: row.Name });
 
       } catch (error) {
-        results.errors.push({
-          row: rowNumber,
-          error: error.message
+        insertErrors.push({
+          ...row,
+          RowNumber: row.rowNumber,
+          Reason: error.message
         });
       }
     }
 
-    res.json({
-      message: `Bulk upload completed. ${results.success.length} leads created, ${results.errors.length} errors.`,
-      results
-    });
+    // Combine validation errors and insert errors
+    const allInvalidRows = [...invalidRows, ...insertErrors];
 
+    // Generate error file if there are invalid rows
+    let errorFileBuffer = null;
+    if (allInvalidRows.length > 0) {
+      const errorWb = XLSX.utils.book_new();
+      const errorWs = XLSX.utils.json_to_sheet(allInvalidRows);
+      XLSX.utils.book_append_sheet(errorWb, errorWs, 'Invalid Rows');
+      errorFileBuffer = XLSX.write(errorWb, { type: 'buffer', bookType: 'xlsx' });
+    }
+
+    const response = {
+      success: true,
+      message: `Upload completed. ${insertedLeads.length} leads created, ${allInvalidRows.length} errors.`,
+      summary: {
+        totalRows: data.length,
+        validRows: insertedLeads.length,
+        invalidRows: allInvalidRows.length
+      },
+      insertedLeads,
+      hasErrors: allInvalidRows.length > 0,
+      errorFile: errorFileBuffer ? errorFileBuffer.toString('base64') : null
+    };
+
+    console.log('Final upload response:', JSON.stringify({
+      success: response.success,
+      message: response.message,
+      summary: response.summary,
+      hasErrors: response.hasErrors,
+      hasErrorFile: !!response.errorFile,
+      insertedLeadsCount: response.insertedLeads.length
+    }, null, 2));
+
+    res.json(response);
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// GET error file download
+router.get('/bulk-upload/errors/:filename', authenticateToken, (req, res) => {
+  try {
+    const { errorData } = req.query;
+    if (!errorData) {
+      return res.status(400).json({ message: 'No error data provided' });
+    }
+
+    const buffer = Buffer.from(errorData, 'base64');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=invalid_rows.xlsx');
+    res.send(buffer);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -316,9 +392,9 @@ router.get('/', authenticateToken, async (req, res) => {
       data: leads,
       pagination: {
         current: pageNum,
-        limit: limitNum,
+        pages: totalPages,
         total,
-        totalPages
+        limit: limitNum
       }
     });
   } catch (error) {

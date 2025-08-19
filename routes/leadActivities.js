@@ -161,13 +161,33 @@ router.get('/:id', async (req, res) => {
 // POST create new lead activity
 router.post('/', async (req, res) => {
   try {
-    // Clean empty strings and null values
+    // Clean empty strings and null values, handle ObjectId fields properly
     const cleanData = { ...req.body };
     Object.keys(cleanData).forEach(key => {
       if (cleanData[key] === '' || cleanData[key] === null || cleanData[key] === undefined) {
         delete cleanData[key];
       }
     });
+    
+    // Validate enum fields
+    const validLeadValues = ['high value', 'medium value', 'low value'];
+    const validPaymentMethods = ['cod', 'upi', 'debit card', 'credit card', 'emi', 'cheque', 'loan'];
+    
+    if (cleanData.leadValue && !validLeadValues.includes(cleanData.leadValue)) {
+      return res.status(400).json({ message: `Invalid lead value: ${cleanData.leadValue}` });
+    }
+    
+    if (cleanData.paymentMethod && !validPaymentMethods.includes(cleanData.paymentMethod)) {
+      return res.status(400).json({ message: `Invalid payment method: ${cleanData.paymentMethod}` });
+    }
+    
+    // Ensure required fields are present
+    if (!cleanData.leadId) {
+      return res.status(400).json({ message: 'Lead ID is required' });
+    }
+    if (!cleanData.sourceId) {
+      return res.status(400).json({ message: 'Source ID is required' });
+    }
     
     const leadActivity = new LeadActivity(cleanData);
     const savedLeadActivity = await leadActivity.save();
@@ -184,7 +204,7 @@ router.post('/', async (req, res) => {
     res.status(201).json(populatedActivity);
   } catch (error) {
     console.error('Lead activity creation error:', error);
-    res.status(400).json({ message: error.message });
+    res.status(400).json({ message: error.message, details: error });
   }
 });
 

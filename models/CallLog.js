@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const callLogSchema = new mongoose.Schema({
+  callId: {
+    type: String,
+    unique: true,
+    required: true
+  },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -11,94 +16,23 @@ const callLogSchema = new mongoose.Schema({
     ref: 'Lead',
     required: true
   },
-  callDateTime: {
+  datetime: {
     type: Date,
-    default: Date.now
-  },
-  callDuration: {
-    type: Number,
-    default: 0
-  },
-  callStatus: {
-    type: String,
-    enum: ['connected', 'not_connected'],
+    default: Date.now,
     required: true
-  },
-  callOutcome: {
-    type: String,
-    enum: [
-      'not_interested',
-      'language_mismatch', 
-      'follow_up',
-      'qualified',
-      'not_reachable',
-      'incorrect_number',
-      'not_picking',
-      'site_visit',
-      'meeting_scheduled',
-      'won'
-    ]
-  },
-  purchaseAmount: {
-    type: Number
-  },
-  paymentMethod: {
-    type: String,
-    enum: ['cash', 'loan', 'emi', 'cheque']
-  },
-  siteVisitDateTime: {
-    type: Date
-  },
-  meetingDateTime: {
-    type: Date
-  },
-  nextCallDateTime: {
-    type: Date
-  },
-  originalLanguageId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Language'
-  },
-  updatedLanguageId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Language'
-  },
-  cifDateTime: {
-    type: Date
-  },
-  languageId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Language'
-  },
-  assignedUserId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-  leadValue: {
-    type: String,
-    enum: ['high_value', 'low_value']
-  },
-  centerId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Centre'
-  },
-  apartmentTypeId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'ProjectAndHouseType'
-  },
-  followUpAction: {
-    type: String,
-    enum: ['not_interested', 'follow_up', 'qualified']
-  },
-  notes: {
-    type: String
-  },
-  deletedAt: {
-    type: Date,
-    default: null
   }
 }, {
   timestamps: true
+});
+
+// Generate unique call ID before validation
+callLogSchema.pre('validate', function(next) {
+  if (!this.callId) {
+    const timestamp = Date.now().toString();
+    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+    this.callId = `CALL-${timestamp}-${random}`;
+  }
+  next();
 });
 
 module.exports = mongoose.model('CallLog', callLogSchema);

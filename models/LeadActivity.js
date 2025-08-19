@@ -51,7 +51,7 @@ const leadActivitySchema = new mongoose.Schema({
   expectedPossessionDate: Date,
   leadValue: {
     type: String,
-    enum: ['high', 'low']
+    enum: ['high value', 'medium value', 'low value']
   },
   paymentMethod: {
     type: String,
