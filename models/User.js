@@ -64,10 +64,17 @@ const userSchema = new mongoose.Schema({
   userType: {
     type: String,
     enum: ['regular', 'cp_presales'],
-    required: function() {
-      return this.populated('roleId') ? 
-        this.roleId.slug === 'presales_agent' : 
-        false;
+    required: false,
+    validate: {
+      validator: async function(value) {
+        if (!this.roleId) return true;
+        const role = await mongoose.model('Role').findById(this.roleId);
+        if (role && role.slug === 'presales_agent') {
+          return value && ['regular', 'cp_presales'].includes(value);
+        }
+        return true; // Not required for other roles
+      },
+      message: 'User type is required for presales agents'
     }
   },
   profileImage: {

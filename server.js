@@ -14,6 +14,7 @@ const userRoutes = require('./routes/users');
 const adminRoutes = require('./routes/admin');
 const leadSourceRoutes = require('./routes/leadSources');
 const projectHouseTypeRoutes = require('./routes/projectAndHouseTypes');
+const leadRoutes = require('./routes/leads');
 
 const app = express();
 
@@ -61,6 +62,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/lead-sources', leadSourceRoutes);
 app.use('/api/project-house-types', projectHouseTypeRoutes);
+app.use('/api/leads', leadRoutes);
 
 // For Vercel deployment
 module.exports = app;

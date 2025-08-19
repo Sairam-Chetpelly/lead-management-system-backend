@@ -97,7 +97,16 @@ router.post('/', authenticateToken, [
   body('roleId').notEmpty().withMessage('Role is required'),
   body('statusId').notEmpty().withMessage('Status is required'),
   body('qualification').isIn(['high_value', 'low_value']).withMessage('Invalid qualification'),
-  body('userType').optional().isIn(['regular', 'cp_presales']).withMessage('Invalid user type')
+  body('userType').custom(async (value, { req }) => {
+    const role = await Role.findById(req.body.roleId);
+    if (role && role.slug === 'presales_agent') {
+      console.log('Validating user type for presales agent');
+      if (!value || !['regular', 'cp_presales'].includes(value)) {
+        throw new Error('User type is required for presales agents');
+      }
+    }
+    return true;
+  })
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -109,6 +118,11 @@ router.post('/', authenticateToken, [
       ...req.body,
       createdBy: req.user._id
     };
+    
+    // Remove empty userType to prevent enum validation error
+    if (!userData.userType) {
+      delete userData.userType;
+    }
 
     const user = new User(userData);
     await user.save();
