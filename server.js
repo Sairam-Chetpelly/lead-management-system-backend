@@ -20,7 +20,7 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://lead-management-system-frontend-xi.vercel.app', 'https://your-custom-domain.com'],
+  origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'],
   credentials: true
 }));
 app.use(express.json());
