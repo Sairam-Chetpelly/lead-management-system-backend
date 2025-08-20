@@ -83,8 +83,48 @@ router.get('/', authenticateToken, async (req, res) => {
       User.countDocuments(filter)
     ]);
     
+    // Get lead counts for sales and presales agents
+    const LeadActivity = require('../models/LeadActivity');
+    const usersWithLeadCounts = await Promise.all(
+      users.map(async (user) => {
+        const userObj = user.toObject();
+        
+        // Only get lead counts for sales and presales agents
+        if (['sales_agent', 'presales_agent'].includes(user.roleId.slug)) {
+          // Get latest lead activity for each unique lead assigned to this user
+          const pipeline = [
+            { $match: { deletedAt: null } },
+            { $sort: { createdAt: -1 } },
+            {
+              $group: {
+                _id: '$leadId',
+                latestActivity: { $first: '$$ROOT' }
+              }
+            },
+            { $replaceRoot: { newRoot: '$latestActivity' } },
+            {
+              $match: {
+                $or: [
+                  { presalesUserId: user._id },
+                  { salesUserId: user._id }
+                ]
+              }
+            },
+            { $count: 'total' }
+          ];
+          
+          const result = await LeadActivity.aggregate(pipeline);
+          userObj.leadCount = result.length > 0 ? result[0].total : 0;
+        } else {
+          userObj.leadCount = 0;
+        }
+        
+        return userObj;
+      })
+    );
+    
     res.json({
-      data: users,
+      data: usersWithLeadCounts,
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
