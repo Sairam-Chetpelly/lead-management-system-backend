@@ -54,7 +54,17 @@ router.get('/', authenticateToken, async (req, res) => {
       ];
     }
     
-    if (role) filter.roleId = role;
+    if (role) {
+      // If role is a slug, find the role by slug first
+      if (typeof role === 'string' && !role.match(/^[0-9a-fA-F]{24}$/)) {
+        const roleDoc = await Role.findOne({ slug: role });
+        if (roleDoc) {
+          filter.roleId = roleDoc._id;
+        }
+      } else {
+        filter.roleId = role;
+      }
+    }
     if (status) filter.statusId = status;
     if (centre) filter.centreId = centre;
     

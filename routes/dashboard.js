@@ -1,54 +1,77 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
 const LeadActivity = require('../models/LeadActivity');
 const CallLog = require('../models/CallLog');
 const Status = require('../models/Status');
 const User = require('../models/User');
+const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
 // Get dashboard statistics
-router.get('/stats', async (req, res) => {
+router.get('/stats', authenticateToken, async (req, res) => {
   try {
     const now = new Date();
     const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     
+    // Get user role for filtering
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+    
+    // Base filter for role-based access
+    let baseFilter = { deletedAt: null };
+    
+    if (userRole === 'presales_agent') {
+      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+      baseFilter.presalesUserId = new mongoose.Types.ObjectId(req.user.userId);
+      if (leadStatus) {
+        baseFilter.leadStatusId = leadStatus._id;
+      }
+    } else if (userRole === 'hod_presales' || userRole === 'manager_presales') {
+      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+      if (leadStatus) {
+        baseFilter.leadStatusId = leadStatus._id;
+      }
+    }
+    
     // Get lead statuses
     const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
     const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
     
     // Total leads
-    const totalLeads = await LeadActivity.countDocuments({ deletedAt: null });
+    const totalLeads = await LeadActivity.countDocuments(baseFilter);
     
     // This week leads
     const weekLeads = await LeadActivity.countDocuments({
-      deletedAt: null,
+      ...baseFilter,
       createdAt: { $gte: startOfWeek }
     });
     
     // Today's leads
     const todayLeads = await LeadActivity.countDocuments({
-      deletedAt: null,
+      ...baseFilter,
       createdAt: { $gte: startOfToday }
     });
     
-    // Today's calls
-    const todayCalls = await CallLog.countDocuments({
-      deletedAt: null,
-      createdAt: { $gte: startOfToday }
-    });
+    // Today's calls (filter by user for presales agents)
+    let callFilter = { deletedAt: null, createdAt: { $gte: startOfToday } };
+    if (userRole === 'presales_agent') {
+      callFilter.userId = new mongoose.Types.ObjectId(req.user.userId);
+    }
+    const todayCalls = await CallLog.countDocuments(callFilter);
     
     // Won leads
     const wonLeads = wonStatus ? await LeadActivity.countDocuments({
-      deletedAt: null,
+      ...baseFilter,
       leadStatusId: wonStatus._id
     }) : 0;
     
     // Lost leads
     const lostLeads = lostStatus ? await LeadActivity.countDocuments({
-      deletedAt: null,
+      ...baseFilter,
       leadStatusId: lostStatus._id
     }) : 0;
     
@@ -62,7 +85,7 @@ router.get('/stats', async (req, res) => {
       nextDate.setDate(nextDate.getDate() + 1);
       
       const count = await LeadActivity.countDocuments({
-        deletedAt: null,
+        ...baseFilter,
         createdAt: { $gte: date, $lt: nextDate }
       });
       
@@ -74,7 +97,7 @@ router.get('/stats', async (req, res) => {
     
     // Lead status distribution
     const statusDistribution = await LeadActivity.aggregate([
-      { $match: { deletedAt: null } },
+      { $match: baseFilter },
       {
         $lookup: {
           from: 'statuses',

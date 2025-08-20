@@ -263,7 +263,10 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
     const phoneRegex = /^[\d\s\+\-\(\)]{10,15}$/;
 
     // Get default lead source
-    const defaultLeadSource = await LeadSource.findOne({ deletedAt: null });
+    const defaultLeadSource = await LeadSource.findOne({ 
+      slug: 'excel', 
+      deletedAt: null 
+    });
     if (!defaultLeadSource) {
       fs.unlinkSync(req.file.path);
       return res.status(400).json({ error: 'No lead source found. Please create a lead source first.' });
@@ -476,11 +479,15 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
 });
 
 // Get all leads with pagination and filters
-router.get('/', async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
+    
+    // Get user role for filtering
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
     
     // Get unique lead IDs first, then get the latest activity for each
     const pipeline = [
@@ -495,8 +502,26 @@ router.get('/', async (req, res) => {
       { $replaceRoot: { newRoot: '$latestActivity' } }
     ];
     
-    // Apply filters to the pipeline
+    // Apply filters to the pipeline - filter AFTER getting latest activity
     const matchStage = { deletedAt: null };
+    
+    // Role-based filtering - apply after grouping
+    let postGroupFilter = {};
+    if (userRole === 'presales_agent') {
+      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+      postGroupFilter = {
+        presalesUserId: new mongoose.Types.ObjectId(req.user.userId),
+        presalesUserId: { $ne: null }
+      };
+      if (leadStatus) {
+        postGroupFilter.leadStatusId = leadStatus._id;
+      }
+    } else if (userRole === 'hod_presales' || userRole === 'manager_presales') {
+      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+      if (leadStatus) {
+        postGroupFilter.leadStatusId = leadStatus._id;
+      }
+    }
     
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, 'i');
@@ -537,6 +562,11 @@ router.get('/', async (req, res) => {
 
     pipeline[0].$match = matchStage;
     
+    // Add post-group filtering for role-based access
+    if (Object.keys(postGroupFilter).length > 0) {
+      pipeline.push({ $match: postGroupFilter });
+    }
+    
     // Add pagination
     pipeline.push(
       { $sort: { createdAt: -1 } },
@@ -563,13 +593,22 @@ router.get('/', async (req, res) => {
     // Get total count for pagination
     const totalPipeline = [
       { $match: matchStage },
+      { $sort: { createdAt: -1 } },
       {
         $group: {
-          _id: '$leadId'
+          _id: '$leadId',
+          latestActivity: { $first: '$$ROOT' }
         }
       },
-      { $count: 'total' }
+      { $replaceRoot: { newRoot: '$latestActivity' } }
     ];
+    
+    // Add post-group filtering for total count too
+    if (Object.keys(postGroupFilter).length > 0) {
+      totalPipeline.push({ $match: postGroupFilter });
+    }
+    
+    totalPipeline.push({ $count: 'total' });
     
     const totalResult = await LeadActivity.aggregate(totalPipeline);
     const total = totalResult.length > 0 ? totalResult[0].total : 0;
@@ -634,7 +673,7 @@ router.get('/export', async (req, res) => {
 });
 
 // Get all lead activities for a lead
-router.get('/:id/activities', async (req, res) => {
+router.get('/:id/activities', authenticateToken, async (req, res) => {
   try {
     // Determine the actual Lead ID
     let actualLeadId = null;
@@ -681,7 +720,7 @@ router.get('/:id/activities', async (req, res) => {
 });
 
 // Get lead by ID with activity data
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticateToken, async (req, res) => {
   try {
     // First check if the ID is a LeadActivity ID or Lead ID
     let leadActivity = null;
@@ -755,7 +794,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Get lead activity timeline
-router.get('/:id/timeline', async (req, res) => {
+router.get('/:id/timeline', authenticateToken, async (req, res) => {
   try {
     // Determine the actual Lead ID
     let actualLeadId = null;
@@ -902,6 +941,140 @@ router.post('/:id/activity', authenticateToken, documentUpload.single('document'
   }
 });
 
+// Create presales lead activity entry (limited fields)
+router.post('/:id/presales-activity', authenticateToken, documentUpload.array('files', 5), async (req, res) => {
+  try {
+    console.log('Presales activity endpoint called with:', req.params.id);
+    console.log('Request body:', req.body);
+    
+    // Determine the actual Lead ID
+    let actualLeadId = null;
+    let existingLeadActivity = null;
+    
+    // Try to find as LeadActivity first
+    try {
+      existingLeadActivity = await LeadActivity.findById(req.params.id);
+      if (existingLeadActivity) {
+        actualLeadId = existingLeadActivity.leadId;
+      }
+    } catch (err) {
+      // If not found as LeadActivity, try as Lead ID directly
+      const lead = await Lead.findById(req.params.id);
+      if (lead) {
+        actualLeadId = lead._id;
+        existingLeadActivity = await LeadActivity.findOne({ leadId: actualLeadId, deletedAt: null })
+          .sort({ createdAt: -1 });
+      }
+    }
+
+    if (!actualLeadId || !existingLeadActivity) {
+      console.log('Lead not found:', { actualLeadId, existingLeadActivity });
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    console.log('Found lead:', actualLeadId);
+
+    // Prepare new lead activity data with limited fields for presales
+    const newLeadActivityData = {
+      leadId: actualLeadId,
+      name: req.body.name || existingLeadActivity.name,
+      email: req.body.email || existingLeadActivity.email,
+      contactNumber: req.body.contactNumber || existingLeadActivity.contactNumber,
+      sourceId: existingLeadActivity.sourceId, // Keep original source (disabled for presales)
+      leadStatusId: req.body.leadStatusId || existingLeadActivity.leadStatusId,
+      centreId: req.body.centreId || existingLeadActivity.centreId,
+      languageId: req.body.languageId || existingLeadActivity.languageId,
+      projectTypeId: req.body.projectTypeId || existingLeadActivity.projectTypeId,
+      houseTypeId: req.body.houseTypeId || existingLeadActivity.houseTypeId,
+      apartmentName: req.body.apartmentName || existingLeadActivity.apartmentName,
+      leadValue: req.body.leadValue || existingLeadActivity.leadValue,
+      notes: req.body.notes || existingLeadActivity.notes,
+      comment: req.body.comment || '',
+      updatedPerson: req.user.userId,
+      // Keep existing values for other fields
+      presalesUserId: existingLeadActivity.presalesUserId,
+      salesUserId: existingLeadActivity.salesUserId,
+      leadSubStatusId: existingLeadActivity.leadSubStatusId,
+      projectValue: existingLeadActivity.projectValue,
+      expectedPossessionDate: existingLeadActivity.expectedPossessionDate,
+      paymentMethod: existingLeadActivity.paymentMethod,
+      siteVisit: existingLeadActivity.siteVisit,
+      siteVisitDate: existingLeadActivity.siteVisitDate,
+      centerVisit: existingLeadActivity.centerVisit,
+      centerVisitDate: existingLeadActivity.centerVisitDate,
+      virtualMeeting: existingLeadActivity.virtualMeeting,
+      virtualMeetingDate: existingLeadActivity.virtualMeetingDate,
+
+    };
+
+    // Handle file uploads
+    if (req.files && req.files.length > 0) {
+      newLeadActivityData.files = req.files.map(file => ({
+        filename: file.filename,
+        originalname: file.originalname,
+        size: file.size,
+        mimetype: file.mimetype
+      }));
+    }
+
+    // Check if lead status changed to qualified
+    if (req.body.leadStatusId) {
+      const leadStatus = await Status.findById(req.body.leadStatusId);
+      console.log('Lead status check:', leadStatus?.slug);
+      
+      if (leadStatus && leadStatus.slug === 'qualified') {
+        console.log('Lead status changed to qualified, assigning to sales team');
+        
+        // Auto-assign to sales team using round robin with centre and language
+        const salesAgent = await getNextSalesAgent(newLeadActivityData.centreId, newLeadActivityData.languageId);
+        if (salesAgent) {
+          console.log('Assigned to sales agent:', salesAgent.name);
+          newLeadActivityData.salesUserId = salesAgent._id;
+          newLeadActivityData.presalesUserId = null; // Clear presales assignment
+        }
+        
+        // Set sub-status to hot
+        const hotSubStatus = await Status.findOne({ slug: 'hot', type: 'leadSubStatus' });
+        if (hotSubStatus) {
+          console.log('Set sub-status to hot');
+          newLeadActivityData.leadSubStatusId = hotSubStatus._id;
+        }
+      }
+    }
+
+    console.log('Creating new lead activity with data:', newLeadActivityData);
+
+    // Create new lead activity
+    const newLeadActivity = new LeadActivity(newLeadActivityData);
+    await newLeadActivity.save();
+
+    // Populate the response
+    await newLeadActivity.populate([
+      { path: 'leadId' },
+      { path: 'presalesUserId', select: 'name email' },
+      { path: 'salesUserId', select: 'name email' },
+      { path: 'updatedPerson', select: 'name email' },
+      { path: 'languageId', select: 'name' },
+      { path: 'sourceId', select: 'name' },
+      { path: 'projectTypeId', select: 'name type' },
+      { path: 'houseTypeId', select: 'name type' },
+      { path: 'centreId', select: 'name' },
+      { path: 'leadStatusId', select: 'name slug' },
+      { path: 'leadSubStatusId', select: 'name slug' }
+    ]);
+
+    console.log('Lead activity created successfully');
+
+    res.status(201).json({ 
+      message: 'Lead updated successfully', 
+      leadActivity: newLeadActivity 
+    });
+  } catch (error) {
+    console.error('Error creating presales lead activity:', error);
+    res.status(500).json({ error: 'Failed to update lead' });
+  }
+});
+
 // Create new lead activity entry
 router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files', 5), async (req, res) => {
   try {
@@ -946,7 +1119,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       'languageId', 'centreId', 'projectTypeId', 'projectValue', 'apartmentName',
       'houseTypeId', 'expectedPossessionDate', 'leadValue', 'paymentMethod',
       'siteVisit', 'siteVisitDate', 'centerVisit', 'centerVisitDate',
-      'virtualMeeting', 'virtualMeetingDate', 'isCompleted', 'isCompletedDate',
+      'virtualMeeting', 'virtualMeetingDate',
       'notes', 'comment'
     ];
 
@@ -966,6 +1139,28 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
         size: file.size,
         mimetype: file.mimetype
       }));
+    }
+
+    // Check if lead status changed to qualified and assign to sales team
+    if (req.body.leadStatusId) {
+      const leadStatus = await Status.findById(req.body.leadStatusId);
+      if (leadStatus && leadStatus.slug === 'qualified') {
+        // Assign to sales agent using round robin
+        const salesAgent = await getNextSalesAgent(newLeadActivityData.centreId, newLeadActivityData.languageId);
+        if (salesAgent) {
+          newLeadActivityData.salesUserId = salesAgent._id;
+          // Clear presales assignment when moving to sales
+          newLeadActivityData.presalesUserId = null;
+        }
+        
+        // Set default sub-status for qualified leads
+        if (!req.body.leadSubStatusId) {
+          const hotSubStatus = await Status.findOne({ slug: 'hot', type: 'leadSubStatus' });
+          if (hotSubStatus) {
+            newLeadActivityData.leadSubStatusId = hotSubStatus._id;
+          }
+        }
+      }
     }
 
     // Create new lead activity

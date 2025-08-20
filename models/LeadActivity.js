@@ -114,14 +114,7 @@ const leadActivitySchema = new mongoose.Schema({
     type: Date,
     required: false
   },
-  isCompleted: {
-    type: Boolean,
-    required: false
-  },
-  isCompletedDate: {
-    type: Date,
-    required: false
-  },
+
   notes: {
     type: String,
     required: false
