@@ -3,7 +3,6 @@ const { body, validationResult } = require('express-validator');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const XLSX = require('xlsx');
 const User = require('../models/User');
 const Role = require('../models/Role');
 const Status = require('../models/Status');
@@ -97,7 +96,17 @@ router.post('/', authenticateToken, [
   body('designation').notEmpty().withMessage('Designation is required'),
   body('roleId').notEmpty().withMessage('Role is required'),
   body('statusId').notEmpty().withMessage('Status is required'),
-  body('qualification').isIn(['high_value', 'low_value']).withMessage('Invalid qualification')
+  body('qualification').isIn(['high_value', 'low_value']).withMessage('Invalid qualification'),
+  body('userType').custom(async (value, { req }) => {
+    const role = await Role.findById(req.body.roleId);
+    if (role && role.slug === 'presales_agent') {
+      console.log('Validating user type for presales agent');
+      if (!value || !['regular', 'cp_presales'].includes(value)) {
+        throw new Error('User type is required for presales agents');
+      }
+    }
+    return true;
+  })
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -109,6 +118,11 @@ router.post('/', authenticateToken, [
       ...req.body,
       createdBy: req.user._id
     };
+    
+    // Remove empty userType to prevent enum validation error
+    if (!userData.userType) {
+      delete userData.userType;
+    }
 
     const user = new User(userData);
     await user.save();
@@ -247,6 +261,7 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Centre': user.centreId?.name || '',
       'Languages': user.languageIds?.map(lang => lang.name).join(', ') || '',
       'Qualification': user.qualification,
+      'User Type': user.userType || '',
       'Created': user.createdAt
     }));
     

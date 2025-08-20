@@ -246,6 +246,83 @@ const seedData = async () => {
     });
     await adminUser.save();
     console.log('Admin user created');
+
+    // Create sample presales agents
+    const presalesRole = savedRoles.find(role => role.slug === 'presales_agent');
+    const presalesAgents = [
+      {
+        name: 'John Presales',
+        email: 'john.presales@lms.com',
+        password: 'password123',
+        mobileNumber: '+91-9999999001',
+        designation: 'Presales Agent',
+        roleId: presalesRole._id,
+        statusId: activeStatus._id,
+        centreId: mumbaiCentre._id,
+        languageIds: [englishLanguage._id],
+        qualification: 'high_value'
+      },
+      {
+        name: 'Sarah Presales',
+        email: 'sarah.presales@lms.com',
+        password: 'password123',
+        mobileNumber: '+91-9999999002',
+        designation: 'Presales Agent',
+        roleId: presalesRole._id,
+        statusId: activeStatus._id,
+        centreId: mumbaiCentre._id,
+        languageIds: [englishLanguage._id],
+        qualification: 'high_value'
+      }
+    ];
+    await User.insertMany(presalesAgents);
+    console.log('Presales agents created');
+
+    // Create sample sales agents
+    const salesRole = savedRoles.find(role => role.slug === 'sales_agent');
+    const delhiCentre = savedCentres.find(centre => centre.slug === 'delhi');
+    const hindiLanguage = savedLanguages.find(lang => lang.code === 'hi');
+    
+    const salesAgents = [
+      {
+        name: 'Mike Sales Mumbai',
+        email: 'mike.sales@lms.com',
+        password: 'password123',
+        mobileNumber: '+91-9999999003',
+        designation: 'Sales Agent',
+        roleId: salesRole._id,
+        statusId: activeStatus._id,
+        centreId: mumbaiCentre._id,
+        languageIds: [englishLanguage._id, hindiLanguage._id],
+        qualification: 'high_value'
+      },
+      {
+        name: 'Lisa Sales Delhi',
+        email: 'lisa.sales@lms.com',
+        password: 'password123',
+        mobileNumber: '+91-9999999004',
+        designation: 'Sales Agent',
+        roleId: salesRole._id,
+        statusId: activeStatus._id,
+        centreId: delhiCentre._id,
+        languageIds: [englishLanguage._id, hindiLanguage._id],
+        qualification: 'high_value'
+      },
+      {
+        name: 'Raj Sales Mumbai',
+        email: 'raj.sales@lms.com',
+        password: 'password123',
+        mobileNumber: '+91-9999999005',
+        designation: 'Sales Agent',
+        roleId: salesRole._id,
+        statusId: activeStatus._id,
+        centreId: mumbaiCentre._id,
+        languageIds: [hindiLanguage._id],
+        qualification: 'high_value'
+      }
+    ];
+    await User.insertMany(salesAgents);
+    console.log('Sales agents created');
     console.log('All data seeded successfully!');
     console.log('Admin login: admin@lms.com / admin123');
     process.exit(0);

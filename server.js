@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
@@ -13,15 +14,19 @@ const userRoutes = require('./routes/users');
 const adminRoutes = require('./routes/admin');
 const leadSourceRoutes = require('./routes/leadSources');
 const projectHouseTypeRoutes = require('./routes/projectAndHouseTypes');
+const leadRoutes = require('./routes/leads');
 
 const app = express();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://lead-management-system-frontend-xi.vercel.app', 'https://your-custom-domain.com'],
+  origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'],
   credentials: true
 }));
 app.use(express.json());
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Rate limiting - 1000 requests per 15 minutes per IP
 const limiter = rateLimit({
@@ -33,9 +38,9 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
-// API Key protection for all routes except health check
+// API Key protection for all routes except health check and document serving
 app.use('/api', (req, res, next) => {
-  if (req.path === '/health') {
+  if (req.path === '/health' || req.path.startsWith('/leads/document/')) {
     return next();
   }
   apiKeyAuth(req, res, next);
@@ -57,6 +62,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/lead-sources', leadSourceRoutes);
 app.use('/api/project-house-types', projectHouseTypeRoutes);
+app.use('/api/leads', leadRoutes);
 
 // For Vercel deployment
 module.exports = app;
