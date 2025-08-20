@@ -508,14 +508,9 @@ router.get('/', authenticateToken, async (req, res) => {
     // Role-based filtering - apply after grouping
     let postGroupFilter = {};
     if (userRole === 'presales_agent') {
-      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
       postGroupFilter = {
-        presalesUserId: new mongoose.Types.ObjectId(req.user.userId),
-        presalesUserId: { $ne: null }
+        presalesUserId: new mongoose.Types.ObjectId(req.user.userId)
       };
-      if (leadStatus) {
-        postGroupFilter.leadStatusId = leadStatus._id;
-      }
     } else if (userRole === 'hod_presales' || userRole === 'manager_presales') {
       const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
       if (leadStatus) {
@@ -558,6 +553,19 @@ router.get('/', authenticateToken, async (req, res) => {
     
     if (req.query.leadSubStatus) {
       matchStage.leadSubStatusId = new mongoose.Types.ObjectId(req.query.leadSubStatus);
+    }
+    
+    // Date range filters
+    if (req.query.dateFrom || req.query.dateTo) {
+      matchStage.createdAt = {};
+      if (req.query.dateFrom) {
+        matchStage.createdAt.$gte = new Date(req.query.dateFrom);
+      }
+      if (req.query.dateTo) {
+        const toDate = new Date(req.query.dateTo);
+        toDate.setHours(23, 59, 59, 999); // End of day
+        matchStage.createdAt.$lte = toDate;
+      }
     }
 
     pipeline[0].$match = matchStage;
@@ -1246,6 +1254,73 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting lead:', error);
     res.status(500).json({ error: 'Failed to delete lead' });
+  }
+});
+
+// Change language and reassign lead
+router.post('/:id/change-language', authenticateToken, async (req, res) => {
+  try {
+    const { languageId, presalesUserId } = req.body;
+    
+    if (!languageId || !presalesUserId) {
+      return res.status(400).json({ error: 'Language ID and Presales User ID are required' });
+    }
+
+    // Find existing lead activity
+    let existingLeadActivity = null;
+    let actualLeadId = null;
+    
+    try {
+      existingLeadActivity = await LeadActivity.findById(req.params.id);
+      if (existingLeadActivity) {
+        actualLeadId = existingLeadActivity.leadId;
+      }
+    } catch (err) {
+      const lead = await Lead.findById(req.params.id);
+      if (lead) {
+        actualLeadId = lead._id;
+        existingLeadActivity = await LeadActivity.findOne({ leadId: actualLeadId, deletedAt: null })
+          .sort({ createdAt: -1 });
+      }
+    }
+
+    if (!actualLeadId || !existingLeadActivity) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    // Create new lead activity with language change
+    const newLeadActivityData = {
+      ...existingLeadActivity.toObject(),
+      _id: undefined,
+      languageId,
+      presalesUserId,
+      comment: 'Language changed and lead reassigned',
+      updatedPerson: req.user.userId,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    const newLeadActivity = new LeadActivity(newLeadActivityData);
+    await newLeadActivity.save();
+
+    await newLeadActivity.populate([
+      { path: 'leadId' },
+      { path: 'presalesUserId', select: 'name email' },
+      { path: 'salesUserId', select: 'name email' },
+      { path: 'languageId', select: 'name' },
+      { path: 'sourceId', select: 'name' },
+      { path: 'centreId', select: 'name' },
+      { path: 'leadStatusId', select: 'name slug' },
+      { path: 'leadSubStatusId', select: 'name slug' }
+    ]);
+
+    res.status(201).json({ 
+      message: 'Language changed and lead reassigned successfully', 
+      leadActivity: newLeadActivity 
+    });
+  } catch (error) {
+    console.error('Error changing language:', error);
+    res.status(500).json({ error: 'Failed to change language' });
   }
 });
 
