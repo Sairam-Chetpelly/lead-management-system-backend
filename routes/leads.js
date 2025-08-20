@@ -353,17 +353,17 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
           continue;
         }
 
-        // Check for duplicate email in database
-        if (existingEmails.has(email)) {
-          errors.push(`Row ${rowNumber}: Email already exists in database (${email})`);
-          continue;
-        }
+        // // Check for duplicate email in database
+        // if (existingEmails.has(email)) {
+        //   errors.push(`Row ${rowNumber}: Email already exists in database (${email})`);
+        //   continue;
+        // }
 
         // Check for duplicate email in current upload
-        if (uploadEmails.has(email)) {
-          errors.push(`Row ${rowNumber}: Duplicate email in upload file (${email})`);
-          continue;
-        }
+        // if (uploadEmails.has(email)) {
+        //   errors.push(`Row ${rowNumber}: Duplicate email in upload file (${email})`);
+        //   continue;
+        // }
 
         // Validate name length
         if (name && name.length > 100) {
