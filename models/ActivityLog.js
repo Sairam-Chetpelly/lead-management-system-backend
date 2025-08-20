@@ -20,6 +20,10 @@ const activityLogSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  document: {
+    type: String,
+    default: null
+  },
   deletedAt: {
     type: Date,
     default: null
