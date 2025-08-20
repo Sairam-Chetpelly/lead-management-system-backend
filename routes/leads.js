@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const multer = require('multer');
 const csv = require('csv-parser');
 const fs = require('fs');
@@ -481,12 +482,25 @@ router.get('/', async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     
-    // Build filter query
-    const filter = { deletedAt: null };
+    // Get unique lead IDs first, then get the latest activity for each
+    const pipeline = [
+      { $match: { deletedAt: null } },
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: '$leadId',
+          latestActivity: { $first: '$$ROOT' }
+        }
+      },
+      { $replaceRoot: { newRoot: '$latestActivity' } }
+    ];
+    
+    // Apply filters to the pipeline
+    const matchStage = { deletedAt: null };
     
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, 'i');
-      filter.$or = [
+      matchStage.$or = [
         { name: searchRegex },
         { email: searchRegex },
         { contactNumber: searchRegex }
@@ -494,50 +508,71 @@ router.get('/', async (req, res) => {
     }
     
     if (req.query.source) {
-      filter.sourceId = req.query.source;
+      matchStage.sourceId = new mongoose.Types.ObjectId(req.query.source);
     }
     
     if (req.query.leadValue) {
-      filter.leadValue = req.query.leadValue;
+      matchStage.leadValue = req.query.leadValue;
     }
     
     if (req.query.centre) {
-      filter.centreId = req.query.centre;
+      matchStage.centreId = new mongoose.Types.ObjectId(req.query.centre);
     }
     
     if (req.query.assignedTo) {
-      filter.$or = [
-        { presalesUserId: req.query.assignedTo },
-        { salesUserId: req.query.assignedTo }
+      const assignedToId = new mongoose.Types.ObjectId(req.query.assignedTo);
+      matchStage.$or = [
+        { presalesUserId: assignedToId },
+        { salesUserId: assignedToId }
       ];
     }
     
     if (req.query.leadStatus) {
-      filter.leadStatusId = req.query.leadStatus;
+      matchStage.leadStatusId = new mongoose.Types.ObjectId(req.query.leadStatus);
     }
     
     if (req.query.leadSubStatus) {
-      filter.leadSubStatusId = req.query.leadSubStatus;
+      matchStage.leadSubStatusId = new mongoose.Types.ObjectId(req.query.leadSubStatus);
     }
 
-    const leads = await LeadActivity.find(filter)
-      .populate([
-        { path: 'leadId' },
-        { path: 'presalesUserId', select: 'name email' },
-        { path: 'salesUserId', select: 'name email' },
-        { path: 'languageId', select: 'name' },
-        { path: 'sourceId', select: 'name' },
-        { path: 'projectTypeId', select: 'name type' },
-        { path: 'houseTypeId', select: 'name type' },
-        { path: 'centreId', select: 'name' },
-        { path: 'leadStatusId', select: 'name slug' },
-        { path: 'leadSubStatusId', select: 'name slug' }
-      ])
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+    pipeline[0].$match = matchStage;
+    
+    // Add pagination
+    pipeline.push(
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit }
+    );
 
-    const total = await LeadActivity.countDocuments(filter);
+    const leads = await LeadActivity.aggregate(pipeline);
+    
+    // Populate the results
+    await LeadActivity.populate(leads, [
+      { path: 'leadId' },
+      { path: 'presalesUserId', select: 'name email' },
+      { path: 'salesUserId', select: 'name email' },
+      { path: 'languageId', select: 'name' },
+      { path: 'sourceId', select: 'name' },
+      { path: 'projectTypeId', select: 'name type' },
+      { path: 'houseTypeId', select: 'name type' },
+      { path: 'centreId', select: 'name' },
+      { path: 'leadStatusId', select: 'name slug' },
+      { path: 'leadSubStatusId', select: 'name slug' }
+    ]);
+
+    // Get total count for pagination
+    const totalPipeline = [
+      { $match: matchStage },
+      {
+        $group: {
+          _id: '$leadId'
+        }
+      },
+      { $count: 'total' }
+    ];
+    
+    const totalResult = await LeadActivity.aggregate(totalPipeline);
+    const total = totalResult.length > 0 ? totalResult[0].total : 0;
 
     res.json({
       leads,
@@ -595,6 +630,53 @@ router.get('/export', async (req, res) => {
   } catch (error) {
     console.error('Error exporting leads:', error);
     res.status(500).json({ error: 'Failed to export leads' });
+  }
+});
+
+// Get all lead activities for a lead
+router.get('/:id/activities', async (req, res) => {
+  try {
+    // Determine the actual Lead ID
+    let actualLeadId = null;
+    
+    // Try to find as LeadActivity first
+    try {
+      const leadActivity = await LeadActivity.findById(req.params.id);
+      if (leadActivity) {
+        actualLeadId = leadActivity.leadId;
+      }
+    } catch (err) {
+      // If not found as LeadActivity, try as Lead ID directly
+      const lead = await Lead.findById(req.params.id);
+      if (lead) {
+        actualLeadId = lead._id;
+      }
+    }
+
+    if (!actualLeadId) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    // Get all lead activities for this lead
+    const leadActivities = await LeadActivity.find({ leadId: actualLeadId, deletedAt: null })
+      .populate([
+        { path: 'presalesUserId', select: 'name email' },
+        { path: 'salesUserId', select: 'name email' },
+        { path: 'updatedPerson', select: 'name email' },
+        { path: 'languageId', select: 'name' },
+        { path: 'sourceId', select: 'name' },
+        { path: 'projectTypeId', select: 'name type' },
+        { path: 'houseTypeId', select: 'name type' },
+        { path: 'centreId', select: 'name' },
+        { path: 'leadStatusId', select: 'name slug' },
+        { path: 'leadSubStatusId', select: 'name slug' }
+      ])
+      .sort({ createdAt: -1 });
+
+    res.json({ leadActivities });
+  } catch (error) {
+    console.error('Error fetching lead activities:', error);
+    res.status(500).json({ error: 'Failed to fetch lead activities' });
   }
 });
 
@@ -817,6 +899,101 @@ router.post('/:id/activity', authenticateToken, documentUpload.single('document'
   } catch (error) {
     console.error('Error creating activity log:', error);
     res.status(500).json({ error: 'Failed to create activity log' });
+  }
+});
+
+// Create new lead activity entry
+router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files', 5), async (req, res) => {
+  try {
+    // Determine the actual Lead ID
+    let actualLeadId = null;
+    let existingLeadActivity = null;
+    
+    // Try to find as LeadActivity first
+    try {
+      existingLeadActivity = await LeadActivity.findById(req.params.id);
+      if (existingLeadActivity) {
+        actualLeadId = existingLeadActivity.leadId;
+      }
+    } catch (err) {
+      // If not found as LeadActivity, try as Lead ID directly
+      const lead = await Lead.findById(req.params.id);
+      if (lead) {
+        actualLeadId = lead._id;
+        // Get the latest LeadActivity for this lead to copy data
+        existingLeadActivity = await LeadActivity.findOne({ leadId: actualLeadId, deletedAt: null })
+          .sort({ createdAt: -1 });
+      }
+    }
+
+    if (!actualLeadId || !existingLeadActivity) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    // Prepare new lead activity data, copying from existing and updating with new data
+    const newLeadActivityData = {
+      leadId: actualLeadId,
+      name: req.body.name || existingLeadActivity.name,
+      email: req.body.email || existingLeadActivity.email,
+      contactNumber: req.body.contactNumber || existingLeadActivity.contactNumber,
+      sourceId: req.body.sourceId || existingLeadActivity.sourceId,
+      updatedPerson: req.user.userId
+    };
+
+    // Add all other fields from request body or existing data
+    const fieldsToUpdate = [
+      'presalesUserId', 'salesUserId', 'leadStatusId', 'leadSubStatusId',
+      'languageId', 'centreId', 'projectTypeId', 'projectValue', 'apartmentName',
+      'houseTypeId', 'expectedPossessionDate', 'leadValue', 'paymentMethod',
+      'siteVisit', 'siteVisitDate', 'centerVisit', 'centerVisitDate',
+      'virtualMeeting', 'virtualMeetingDate', 'isCompleted', 'isCompletedDate',
+      'notes', 'comment'
+    ];
+
+    fieldsToUpdate.forEach(field => {
+      if (req.body[field] !== undefined) {
+        newLeadActivityData[field] = req.body[field] || null;
+      } else {
+        newLeadActivityData[field] = existingLeadActivity[field];
+      }
+    });
+
+    // Handle file uploads
+    if (req.files && req.files.length > 0) {
+      newLeadActivityData.files = req.files.map(file => ({
+        filename: file.filename,
+        originalname: file.originalname,
+        size: file.size,
+        mimetype: file.mimetype
+      }));
+    }
+
+    // Create new lead activity
+    const newLeadActivity = new LeadActivity(newLeadActivityData);
+    await newLeadActivity.save();
+
+    // Populate the response
+    await newLeadActivity.populate([
+      { path: 'leadId' },
+      { path: 'presalesUserId', select: 'name email' },
+      { path: 'salesUserId', select: 'name email' },
+      { path: 'updatedPerson', select: 'name email' },
+      { path: 'languageId', select: 'name' },
+      { path: 'sourceId', select: 'name' },
+      { path: 'projectTypeId', select: 'name type' },
+      { path: 'houseTypeId', select: 'name type' },
+      { path: 'centreId', select: 'name' },
+      { path: 'leadStatusId', select: 'name slug' },
+      { path: 'leadSubStatusId', select: 'name slug' }
+    ]);
+
+    res.status(201).json({ 
+      message: 'Lead activity created successfully', 
+      leadActivity: newLeadActivity 
+    });
+  } catch (error) {
+    console.error('Error creating lead activity:', error);
+    res.status(500).json({ error: 'Failed to create lead activity' });
   }
 });
 

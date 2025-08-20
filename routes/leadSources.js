@@ -22,6 +22,19 @@ router.get('/export', async (req, res) => {
   }
 });
 
+// GET all lead sources without pagination (for dropdowns)
+router.get('/all', async (req, res) => {
+  try {
+    const leadSources = await LeadSource.find({ deletedAt: null })
+      .select('_id name slug')
+      .sort({ name: 1 });
+    
+    res.json(leadSources);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // GET all lead sources with pagination and filtering
 router.get('/', async (req, res) => {
   try {
