@@ -114,9 +114,8 @@ const leadActivitySchema = new mongoose.Schema({
     type: Date,
     required: false
   },
-
-  notes: {
-    type: String,
+  cifDate: {
+    type: Date,
     required: false
   },
   comment: {

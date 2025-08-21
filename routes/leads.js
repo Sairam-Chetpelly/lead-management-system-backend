@@ -148,16 +148,23 @@ router.post('/', async (req, res) => {
       languageId,
       projectTypeId,
       houseTypeId,
-      leadValue,
-      notes,
-      sourceId
+      leadValue
     } = req.body;
 
     // Validate required fields
-    if (!email || !contactNumber || !assignmentType || !sourceId) {
+    if (!email || !contactNumber || !assignmentType) {
       return res.status(400).json({
-        error: 'Missing required fields: email, contactNumber, assignmentType, sourceId'
+        error: 'Missing required fields: email, contactNumber, assignmentType'
       });
+    }
+
+    // Get manual lead source
+    const manualLeadSource = await LeadSource.findOne({ 
+      slug: 'manual', 
+      deletedAt: null 
+    });
+    if (!manualLeadSource) {
+      return res.status(400).json({ error: 'Manual lead source not found. Please create a manual lead source first.' });
     }
 
     // Create lead
@@ -170,12 +177,12 @@ router.post('/', async (req, res) => {
       name,
       email,
       contactNumber,
-      sourceId
+      sourceId: manualLeadSource._id
     };
     
     // Only add optional fields if they have values
     if (comment) leadActivityData.comment = comment;
-    if (notes) leadActivityData.notes = notes;
+
     if (languageId) leadActivityData.languageId = languageId;
     if (centreId) leadActivityData.centreId = centreId;
     if (projectTypeId) leadActivityData.projectTypeId = projectTypeId;
@@ -511,6 +518,16 @@ router.get('/', authenticateToken, async (req, res) => {
       postGroupFilter = {
         presalesUserId: new mongoose.Types.ObjectId(req.user.userId)
       };
+    } else if (userRole === 'sales_agent') {
+      const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
+      const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
+      
+      postGroupFilter = {
+        salesUserId: new mongoose.Types.ObjectId(req.user.userId),
+        leadStatusId: { 
+          $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean)
+        }
+      };
     } else if (userRole === 'hod_presales' || userRole === 'manager_presales') {
       const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
       if (leadStatus) {
@@ -669,7 +686,7 @@ router.get('/export', async (req, res) => {
       'Project Type': lead.projectTypeId?.name || '',
       'House Type': lead.houseTypeId?.name || '',
       'Comment': lead.comment || '',
-      'Notes': lead.notes || '',
+
       'Created At': new Date(lead.createdAt).toLocaleString()
     }));
 
@@ -996,7 +1013,6 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
       houseTypeId: req.body.houseTypeId || existingLeadActivity.houseTypeId,
       apartmentName: req.body.apartmentName || existingLeadActivity.apartmentName,
       leadValue: req.body.leadValue || existingLeadActivity.leadValue,
-      notes: req.body.notes || existingLeadActivity.notes,
       comment: req.body.comment || '',
       updatedPerson: req.user.userId,
       // Keep existing values for other fields
@@ -1012,6 +1028,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
       centerVisitDate: existingLeadActivity.centerVisitDate,
       virtualMeeting: existingLeadActivity.virtualMeeting,
       virtualMeetingDate: existingLeadActivity.virtualMeetingDate,
+      cifDate: existingLeadActivity.cifDate,
 
     };
 
@@ -1127,8 +1144,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       'languageId', 'centreId', 'projectTypeId', 'projectValue', 'apartmentName',
       'houseTypeId', 'expectedPossessionDate', 'leadValue', 'paymentMethod',
       'siteVisit', 'siteVisitDate', 'centerVisit', 'centerVisitDate',
-      'virtualMeeting', 'virtualMeetingDate',
-      'notes', 'comment'
+      'virtualMeeting', 'virtualMeetingDate', 'comment', 'cifDate'
     ];
 
     fieldsToUpdate.forEach(field => {
@@ -1138,6 +1154,13 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
         newLeadActivityData[field] = existingLeadActivity[field];
       }
     });
+
+    // Handle CIF date field
+    if (req.body.cifDate !== undefined) {
+      newLeadActivityData.cifDate = req.body.cifDate ? new Date(req.body.cifDate) : null;
+    } else {
+      newLeadActivityData.cifDate = existingLeadActivity.cifDate;
+    }
 
     // Handle file uploads
     if (req.files && req.files.length > 0) {
