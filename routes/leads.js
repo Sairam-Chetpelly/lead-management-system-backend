@@ -342,10 +342,10 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
         const comment = row.comment ? row.comment.toString().trim() : '';
 
         // Validate required fields
-        if (!email) {
-          errors.push(`Row ${rowNumber}: Email is required`);
-          continue;
-        }
+        // if (!email) {
+        //   errors.push(`Row ${rowNumber}: Email is required`);
+        //   continue;
+        // }
 
         if (!contactNumber) {
           errors.push(`Row ${rowNumber}: Contact number is required`);
@@ -353,10 +353,10 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
         }
 
         // Validate email format
-        if (!emailRegex.test(email)) {
-          errors.push(`Row ${rowNumber}: Invalid email format (${email})`);
-          continue;
-        }
+        // if (!emailRegex.test(email)) {
+        //   errors.push(`Row ${rowNumber}: Invalid email format (${email})`);
+        //   continue;
+        // }
 
         // Validate phone number format
         if (!phoneRegex.test(contactNumber)) {
@@ -518,6 +518,10 @@ router.get('/', authenticateToken, async (req, res) => {
       postGroupFilter = {
         presalesUserId: new mongoose.Types.ObjectId(req.user.userId)
       };
+      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+      if (leadStatus) {
+        postGroupFilter.leadStatusId = leadStatus._id;
+      }
     } else if (userRole === 'sales_agent') {
       const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
       const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });

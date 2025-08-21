@@ -12,7 +12,7 @@ const leadActivitySchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    required: true
+    required: false
   },
   contactNumber: {
     type: String,
