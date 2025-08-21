@@ -112,9 +112,9 @@ router.get('/stats', authenticateToken, async (req, res) => {
         createdAt: { $gte: date, $lt: nextDate }
       });
       
-      // Daily call count for presales agents
+      // Daily call count for presales and sales agents
       let dayCallFilter = { deletedAt: null, createdAt: { $gte: date, $lt: nextDate } };
-      if (userRole === 'presales_agent') {
+      if (userRole === 'presales_agent' || userRole === 'sales_agent') {
         dayCallFilter.userId = new mongoose.Types.ObjectId(req.user.userId);
       }
       const dayCallCount = await CallLog.countDocuments(dayCallFilter);
@@ -196,24 +196,25 @@ router.get('/stats', authenticateToken, async (req, res) => {
     statusDistribution.sort((a, b) => b.count - a.count);
     statusDistribution.splice(6);
     
-    // Lead value distribution for presales agents
-    let leadValueDistribution = [];
-    if (userRole === 'presales_agent') {
-      const valuePipeline = [
-        { $match: { deletedAt: null } },
-        { $sort: { createdAt: -1 } },
-        { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
-        { $replaceRoot: { newRoot: '$latestActivity' } },
-        { $match: { presalesUserId: new mongoose.Types.ObjectId(req.user.userId) } },
-        { $group: { _id: '$leadValue', count: { $sum: 1 } } }
-      ];
-      
-      const valueResults = await LeadActivity.aggregate(valuePipeline);
-      leadValueDistribution = valueResults.map(item => ({
-        _id: item._id || 'Not Set',
-        count: item.count
-      }));
+    // Lead value distribution for all users
+    const valuePipeline = [
+      { $match: { deletedAt: null } },
+      { $sort: { createdAt: -1 } },
+      { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
+      { $replaceRoot: { newRoot: '$latestActivity' } }
+    ];
+    
+    if (Object.keys(postGroupFilter).length > 0) {
+      valuePipeline.push({ $match: postGroupFilter });
     }
+    
+    valuePipeline.push({ $group: { _id: '$leadValue', count: { $sum: 1 } } });
+    
+    const valueResults = await LeadActivity.aggregate(valuePipeline);
+    const leadValueDistribution = valueResults.map(item => ({
+      _id: item._id || 'Not Set',
+      count: item.count
+    }));
     
     // Source-wise lead distribution based on user role
     const sourcePipeline = [
@@ -342,6 +343,44 @@ router.get('/stats', authenticateToken, async (req, res) => {
     
     const languageDistribution = await LeadActivity.aggregate(languagePipeline);
     
+    // Lead sub-status distribution for sales users and admin
+    let leadSubStatusDistribution = [];
+    if (userRole === 'sales_agent' || userRole === 'admin' || userRole === 'hod_sales' || userRole === 'manager_sales') {
+      const subStatusPipeline = [
+        { $match: { deletedAt: null } },
+        { $sort: { createdAt: -1 } },
+        { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
+        { $replaceRoot: { newRoot: '$latestActivity' } }
+      ];
+      
+      if (userRole === 'sales_agent') {
+        const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
+        const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
+        subStatusPipeline.push({ 
+          $match: { 
+            salesUserId: new mongoose.Types.ObjectId(req.user.userId),
+            leadStatusId: { $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean) }
+          } 
+        });
+      }
+      
+      subStatusPipeline.push({ $group: { _id: '$leadSubStatusId', count: { $sum: 1 } } });
+      
+      const subStatusResults = await LeadActivity.aggregate(subStatusPipeline);
+      const allSubStatuses = await Status.find({ type: 'leadSubStatus', deletedAt: null });
+      
+      leadSubStatusDistribution = subStatusResults.map(item => {
+        if (item._id === null) {
+          return { _id: 'No Sub Status', count: item.count };
+        }
+        const subStatus = allSubStatuses.find(s => s._id.toString() === item._id.toString());
+        return {
+          _id: subStatus ? subStatus.name : 'Unknown',
+          count: item.count
+        };
+      });
+    }
+    
     res.json({
       totalLeads,
       weekLeads,
@@ -355,7 +394,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
       leadValueDistribution,
       sourceDistribution,
       centerDistribution,
-      languageDistribution
+      languageDistribution,
+      leadSubStatusDistribution
     });
     
   } catch (error) {
