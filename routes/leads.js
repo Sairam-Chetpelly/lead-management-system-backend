@@ -152,9 +152,9 @@ router.post('/', async (req, res) => {
     } = req.body;
 
     // Validate required fields
-    if (!email || !contactNumber || !assignmentType) {
+    if ( !contactNumber || !assignmentType) {
       return res.status(400).json({
-        error: 'Missing required fields: email, contactNumber, assignmentType'
+        error: 'Missing required fields: contactNumber, assignmentType'
       });
     }
 
