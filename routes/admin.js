@@ -5,6 +5,8 @@ const Centre = require('../models/Centre');
 const Language = require('../models/Language');
 const Status = require('../models/Status');
 const User = require('../models/User');
+const Lead = require('../models/Lead');
+const LeadActivity = require('../models/LeadActivity');
 const { authenticateToken } = require('../middleware/auth');
 const createCrudController = require('../utils/crudController');
 const router = express.Router();
@@ -38,6 +40,86 @@ router.get('/roles/all', authenticateToken, roleController.getAllSimple);
 router.get('/centres/all', authenticateToken, centreController.getAllSimple);
 router.get('/languages/all', authenticateToken, languageController.getAllSimple);
 router.get('/statuses/all', authenticateToken, statusController.getAllSimple);
+
+// User delete endpoint for admin
+router.delete('/users/:id', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.params.id;
+    
+    const user = await User.findById(userId);
+    if (!user || user.deletedAt) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Check for related leads
+    const leadCount = await LeadActivity.countDocuments({ 
+      $or: [
+        { presalesUserId: userId },
+        { salesUserId: userId },
+        { updatedPerson: userId }
+      ],
+      deletedAt: null 
+    });
+    
+    if (leadCount > 0) {
+      return res.status(400).json({ 
+        error: `Cannot delete user "${user.name}". This user has ${leadCount} lead${leadCount > 1 ? 's' : ''} assigned. Please reassign or remove them first.` 
+      });
+    }
+    
+    await User.findByIdAndUpdate(
+      userId,
+      { deletedAt: new Date() },
+      { new: true }
+    );
+    
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Lead delete endpoint for admin
+router.delete('/leads/:id', authenticateToken, async (req, res) => {
+  try {
+    const leadId = req.params.id;
+    
+    // Try to find as LeadActivity first
+    let leadActivity = await LeadActivity.findById(leadId);
+    let actualLeadId = null;
+    
+    if (leadActivity) {
+      actualLeadId = leadActivity.leadId;
+    } else {
+      // Try as Lead ID directly
+      const lead = await Lead.findById(leadId);
+      if (lead) {
+        actualLeadId = lead._id;
+        leadActivity = await LeadActivity.findOne({ leadId: actualLeadId, deletedAt: null });
+      }
+    }
+    
+    if (!leadActivity || leadActivity.deletedAt) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+    
+    // Soft delete all lead activities for this lead
+    await LeadActivity.updateMany(
+      { leadId: actualLeadId, deletedAt: null },
+      { deletedAt: new Date() }
+    );
+    
+    // Soft delete the main lead
+    await Lead.findByIdAndUpdate(
+      actualLeadId,
+      { deletedAt: new Date() }
+    );
+    
+    res.json({ message: 'Lead deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Users endpoint for admin
 router.get('/users', authenticateToken, async (req, res) => {
@@ -95,7 +177,56 @@ router.post('/centres', authenticateToken, [
   body('slug').notEmpty().withMessage('Slug is required')
 ], centreController.create);
 router.put('/centres/:id', authenticateToken, centreController.update);
-router.delete('/centres/:id', authenticateToken, centreController.delete);
+router.delete('/centres/:id', authenticateToken, async (req, res) => {
+  try {
+    const centreId = req.params.id;
+    
+    // Check if centre exists
+    const centre = await Centre.findById(centreId);
+    if (!centre || centre.deletedAt) {
+      return res.status(404).json({ error: 'Centre not found' });
+    }
+    
+    // Check for related users
+    const userCount = await User.countDocuments({ 
+      centreId: centreId, 
+      deletedAt: null 
+    });
+    
+    // Check for related leads (in LeadActivity)
+    const leadCount = await LeadActivity.countDocuments({ 
+      centreId: centreId, 
+      deletedAt: null 
+    });
+    
+    if (userCount > 0 || leadCount > 0) {
+      let message = `Cannot delete centre "${centre.name}". This centre has `;
+      const relations = [];
+      
+      if (userCount > 0) {
+        relations.push(`${userCount} user${userCount > 1 ? 's' : ''}`);
+      }
+      if (leadCount > 0) {
+        relations.push(`${leadCount} lead${leadCount > 1 ? 's' : ''}`);
+      }
+      
+      message += relations.join(' and ') + '. Please reassign or remove them first.';
+      
+      return res.status(400).json({ error: message });
+    }
+    
+    // If no relations, proceed with soft delete
+    await Centre.findByIdAndUpdate(
+      centreId,
+      { deletedAt: new Date() },
+      { new: true }
+    );
+    
+    res.json({ message: 'Centre deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Languages CRUD with pagination
 router.get('/languages', authenticateToken, languageController.getAll);
@@ -105,7 +236,52 @@ router.post('/languages', authenticateToken, [
   body('code').notEmpty().withMessage('Code is required')
 ], languageController.create);
 router.put('/languages/:id', authenticateToken, languageController.update);
-router.delete('/languages/:id', authenticateToken, languageController.delete);
+router.delete('/languages/:id', authenticateToken, async (req, res) => {
+  try {
+    const languageId = req.params.id;
+    
+    const language = await Language.findById(languageId);
+    if (!language || language.deletedAt) {
+      return res.status(404).json({ error: 'Language not found' });
+    }
+    
+    const userCount = await User.countDocuments({ 
+      languageIds: languageId, 
+      deletedAt: null 
+    });
+    
+    const leadCount = await LeadActivity.countDocuments({ 
+      languageId: languageId, 
+      deletedAt: null 
+    });
+    
+    if (userCount > 0 || leadCount > 0) {
+      let message = `Cannot delete language "${language.name}". This language has `;
+      const relations = [];
+      
+      if (userCount > 0) {
+        relations.push(`${userCount} user${userCount > 1 ? 's' : ''}`);
+      }
+      if (leadCount > 0) {
+        relations.push(`${leadCount} lead${leadCount > 1 ? 's' : ''}`);
+      }
+      
+      message += relations.join(' and ') + '. Please reassign or remove them first.';
+      
+      return res.status(400).json({ error: message });
+    }
+    
+    await Language.findByIdAndUpdate(
+      languageId,
+      { deletedAt: new Date() },
+      { new: true }
+    );
+    
+    res.json({ message: 'Language deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Statuses CRUD with pagination
 router.get('/statuses', authenticateToken, statusController.getAll);
@@ -114,7 +290,55 @@ router.post('/statuses', authenticateToken, [
   body('slug').notEmpty().withMessage('Slug is required')
 ], statusController.create);
 router.put('/statuses/:id', authenticateToken, statusController.update);
-router.delete('/statuses/:id', authenticateToken, statusController.delete);
+router.delete('/statuses/:id', authenticateToken, async (req, res) => {
+  try {
+    const statusId = req.params.id;
+    
+    const status = await Status.findById(statusId);
+    if (!status || status.deletedAt) {
+      return res.status(404).json({ error: 'Status not found' });
+    }
+    
+    const userCount = await User.countDocuments({ 
+      statusId: statusId, 
+      deletedAt: null 
+    });
+    
+    const leadCount = await LeadActivity.countDocuments({ 
+      $or: [
+        { leadStatusId: statusId },
+        { leadSubStatusId: statusId }
+      ],
+      deletedAt: null 
+    });
+    
+    if (userCount > 0 || leadCount > 0) {
+      let message = `Cannot delete status "${status.name}". This status has `;
+      const relations = [];
+      
+      if (userCount > 0) {
+        relations.push(`${userCount} user${userCount > 1 ? 's' : ''}`);
+      }
+      if (leadCount > 0) {
+        relations.push(`${leadCount} lead${leadCount > 1 ? 's' : ''}`);
+      }
+      
+      message += relations.join(' and ') + '. Please reassign or remove them first.';
+      
+      return res.status(400).json({ error: message });
+    }
+    
+    await Status.findByIdAndUpdate(
+      statusId,
+      { deletedAt: new Date() },
+      { new: true }
+    );
+    
+    res.json({ message: 'Status deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Export Routes (JSON for CSV)
 router.get('/roles/export', authenticateToken, roleController.export);

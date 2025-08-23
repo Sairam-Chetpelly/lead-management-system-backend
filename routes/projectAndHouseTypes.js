@@ -105,15 +105,35 @@ router.put('/:id', async (req, res) => {
 // DELETE project and house type (soft delete)
 router.delete('/:id', async (req, res) => {
   try {
-    const type = await ProjectAndHouseType.findByIdAndUpdate(
-      req.params.id,
+    const typeId = req.params.id;
+    
+    const type = await ProjectAndHouseType.findById(typeId);
+    if (!type || type.deletedAt) {
+      return res.status(404).json({ message: 'Type not found' });
+    }
+    
+    const LeadActivity = require('../models/LeadActivity');
+    const leadCount = await LeadActivity.countDocuments({ 
+      $or: [
+        { projectTypeId: typeId },
+        { houseTypeId: typeId }
+      ],
+      deletedAt: null 
+    });
+    
+    if (leadCount > 0) {
+      return res.status(400).json({ 
+        error: `Cannot delete ${type.type} "${type.name}". This ${type.type} has ${leadCount} lead${leadCount > 1 ? 's' : ''}. Please reassign or remove them first.` 
+      });
+    }
+    
+    await ProjectAndHouseType.findByIdAndUpdate(
+      typeId,
       { deletedAt: new Date() },
       { new: true }
     );
-    if (!type) {
-      return res.status(404).json({ message: 'Type not found' });
-    }
-    res.json({ message: 'Type deleted successfully' });
+    
+    res.json({ message: `${type.type} deleted successfully` });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

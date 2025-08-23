@@ -122,14 +122,31 @@ router.put('/:id', async (req, res) => {
 // DELETE lead source (soft delete)
 router.delete('/:id', async (req, res) => {
   try {
-    const leadSource = await LeadSource.findByIdAndUpdate(
-      req.params.id,
+    const sourceId = req.params.id;
+    
+    const leadSource = await LeadSource.findById(sourceId);
+    if (!leadSource || leadSource.deletedAt) {
+      return res.status(404).json({ message: 'Lead source not found' });
+    }
+    
+    const LeadActivity = require('../models/LeadActivity');
+    const leadCount = await LeadActivity.countDocuments({ 
+      sourceId: sourceId, 
+      deletedAt: null 
+    });
+    
+    if (leadCount > 0) {
+      return res.status(400).json({ 
+        error: `Cannot delete lead source "${leadSource.name}". This lead source has ${leadCount} lead${leadCount > 1 ? 's' : ''}. Please reassign or remove them first.` 
+      });
+    }
+    
+    await LeadSource.findByIdAndUpdate(
+      sourceId,
       { deletedAt: new Date() },
       { new: true }
     );
-    if (!leadSource) {
-      return res.status(404).json({ message: 'Lead source not found' });
-    }
+    
     res.json({ message: 'Lead source deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });

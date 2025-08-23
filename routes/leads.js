@@ -44,27 +44,53 @@ const documentUpload = multer({
 
 // Round robin assignment tracking
 let presalesRoundRobin = 0;
+let cpPresalesRoundRobin = 0;
 let salesRoundRobin = {};
 
 // Helper function to get next presales agent
-async function getNextPresalesAgent() {
+async function getNextPresalesAgent(assignToCpPresales = false) {
   const presalesRole = await Role.findOne({ slug: 'presales_agent' });
   const activeStatus = await Status.findOne({ slug: 'active' });
   if (!presalesRole) return null;
   if (!activeStatus) return null;
 
-  const presalesAgents = await User.find({ 
-    roleId: presalesRole._id,
-    statusId: activeStatus._id,
-    deletedAt: null 
-  });
+  let presalesAgents;
   
-  if (presalesAgents.length === 0) return null;
-  
-  const agent = presalesAgents[presalesRoundRobin % presalesAgents.length];
-  presalesRoundRobin++;
-  
-  return agent;
+  if (assignToCpPresales) {
+    // Get CP presales agents only
+    presalesAgents = await User.find({ 
+      roleId: presalesRole._id,
+      statusId: activeStatus._id,
+      userType: 'cp_presales',
+      deletedAt: null 
+    });
+    
+    if (presalesAgents.length === 0) return null;
+    
+    const agent = presalesAgents[cpPresalesRoundRobin % presalesAgents.length];
+    cpPresalesRoundRobin++;
+    
+    return agent;
+  } else {
+    // Get regular presales agents only
+    presalesAgents = await User.find({ 
+      roleId: presalesRole._id,
+      statusId: activeStatus._id,
+      $or: [
+        { userType: 'regular' },
+        { userType: { $exists: false } },
+        { userType: null }
+      ],
+      deletedAt: null 
+    });
+    
+    if (presalesAgents.length === 0) return null;
+    
+    const agent = presalesAgents[presalesRoundRobin % presalesAgents.length];
+    presalesRoundRobin++;
+    
+    return agent;
+  }
 }
 
 // Helper function to get next sales agent
@@ -144,6 +170,7 @@ router.post('/', async (req, res) => {
       contactNumber,
       comment,
       assignmentType,
+      leadSourceId,
       centreId,
       languageId,
       projectTypeId,
@@ -152,19 +179,16 @@ router.post('/', async (req, res) => {
     } = req.body;
 
     // Validate required fields
-    if ( !contactNumber || !assignmentType) {
+    if (!contactNumber || !assignmentType || !leadSourceId) {
       return res.status(400).json({
-        error: 'Missing required fields: contactNumber, assignmentType'
+        error: 'Missing required fields: contactNumber, assignmentType, leadSourceId'
       });
     }
 
-    // Get manual lead source
-    const manualLeadSource = await LeadSource.findOne({ 
-      slug: 'manual', 
-      deletedAt: null 
-    });
-    if (!manualLeadSource) {
-      return res.status(400).json({ error: 'Manual lead source not found. Please create a manual lead source first.' });
+    // Get lead source
+    const leadSource = await LeadSource.findById(leadSourceId);
+    if (!leadSource) {
+      return res.status(400).json({ error: 'Lead source not found.' });
     }
 
     // Create lead
@@ -177,7 +201,7 @@ router.post('/', async (req, res) => {
       name,
       email,
       contactNumber,
-      sourceId: manualLeadSource._id
+      sourceId: leadSource._id
     };
     
     // Only add optional fields if they have values
@@ -191,7 +215,9 @@ router.post('/', async (req, res) => {
 
     // Assign user and status based on assignment type
     if (assignmentType === 'presales') {
-      const presalesAgent = await getNextPresalesAgent();
+      // Check if lead source is CP to determine assignment type
+      const isCpSource = leadSource.slug === 'cp' || leadSource.name.toLowerCase().includes('cp');
+      const presalesAgent = await getNextPresalesAgent(isCpSource);
       const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
       if (presalesAgent) {
         leadActivityData.presalesUserId = presalesAgent._id;
@@ -395,8 +421,8 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
         const lead = new Lead();
         await lead.save();
 
-        // Get next presales agent (round robin)
-        const presalesAgent = await getNextPresalesAgent();
+        // Get next presales agent (round robin) - default to regular presales for bulk upload
+        const presalesAgent = await getNextPresalesAgent(false);
         const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
 
         // Prepare lead activity data
