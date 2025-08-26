@@ -279,7 +279,58 @@ router.delete('/centres/:id', authenticateToken, async (req, res) => {
 });
 
 // Languages CRUD with pagination
-router.get('/languages', authenticateToken, languageController.getAll);
+router.get('/languages', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '' } = req.query;
+    
+    const filter = { deletedAt: null };
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } },
+        { code: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const [languages, total] = await Promise.all([
+      Language.find(filter)
+        .skip(skip)
+        .limit(parseInt(limit))
+        .sort({ createdAt: -1 }),
+      Language.countDocuments(filter)
+    ]);
+    
+    // Add user and lead counts for each language
+    const languagesWithCounts = await Promise.all(
+      languages.map(async (language) => {
+        const [userCount, leadCount] = await Promise.all([
+          User.countDocuments({ languageIds: language._id, deletedAt: null }),
+          LeadActivity.countDocuments({ languageId: language._id, deletedAt: null })
+        ]);
+        
+        return {
+          ...language.toObject(),
+          userCount,
+          leadCount
+        };
+      })
+    );
+    
+    res.json({
+      data: languagesWithCounts,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        total,
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 router.post('/languages', authenticateToken, [
   body('name').notEmpty().withMessage('Name is required'),
   body('slug').notEmpty().withMessage('Slug is required'),
@@ -418,7 +469,33 @@ router.get('/centres/export', authenticateToken, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-router.get('/languages/export', authenticateToken, languageController.export);
+router.get('/languages/export', authenticateToken, async (req, res) => {
+  try {
+    const languages = await Language.find({ deletedAt: null }).sort({ createdAt: -1 });
+    
+    const csvData = await Promise.all(
+      languages.map(async (language) => {
+        const [userCount, leadCount] = await Promise.all([
+          User.countDocuments({ languageIds: language._id, deletedAt: null }),
+          LeadActivity.countDocuments({ languageId: language._id, deletedAt: null })
+        ]);
+        
+        return {
+          'Name': language.name,
+          'Slug': language.slug,
+          'Code': language.code,
+          'User Count': userCount,
+          'Lead Count': leadCount,
+          'Created': language.createdAt
+        };
+      })
+    );
+    
+    res.json(csvData);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 router.get('/statuses/export', authenticateToken, statusController.export);
 
 module.exports = router;

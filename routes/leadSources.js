@@ -8,13 +8,24 @@ router.get('/export', async (req, res) => {
     const leadSources = await LeadSource.find({ deletedAt: null })
       .sort({ createdAt: -1 });
     
-    const csvData = leadSources.map(source => ({
-      'Name': source.name,
-      'Slug': source.slug,
-      'Description': source.description,
-      'Type': source.isApiSource ? 'API' : 'Manual',
-      'Created': source.createdAt
-    }));
+    const LeadActivity = require('../models/LeadActivity');
+    const csvData = await Promise.all(
+      leadSources.map(async (source) => {
+        const leadCount = await LeadActivity.countDocuments({ 
+          sourceId: source._id, 
+          deletedAt: null 
+        });
+        
+        return {
+          'Name': source.name,
+          'Slug': source.slug,
+          'Description': source.description,
+          'Type': source.isApiSource ? 'API' : 'Manual',
+          'Lead Count': leadCount,
+          'Created': source.createdAt
+        };
+      })
+    );
     
     res.json(csvData);
   } catch (error) {
@@ -64,8 +75,24 @@ router.get('/', async (req, res) => {
       LeadSource.countDocuments(filter)
     ]);
     
+    // Add lead count for each source
+    const LeadActivity = require('../models/LeadActivity');
+    const leadSourcesWithCounts = await Promise.all(
+      leadSources.map(async (source) => {
+        const leadCount = await LeadActivity.countDocuments({ 
+          sourceId: source._id, 
+          deletedAt: null 
+        });
+        
+        return {
+          ...source.toObject(),
+          leadCount
+        };
+      })
+    );
+    
     res.json({
-      data: leadSources,
+      data: leadSourcesWithCounts,
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
