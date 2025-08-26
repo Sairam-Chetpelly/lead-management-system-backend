@@ -46,6 +46,7 @@ const documentUpload = multer({
 let presalesRoundRobin = 0;
 let cpPresalesRoundRobin = 0;
 let salesRoundRobin = {};
+let languageRoundRobin = {};
 
 // Helper function to get next presales agent
 async function getNextPresalesAgent(assignToCpPresales = false) {
@@ -132,6 +133,22 @@ async function getNextSalesAgent(centreId, languageId) {
   return agent;
 }
 
+// Get unsigned leads (must be before parameterized routes)
+router.get('/unsigned', authenticateToken, async (req, res) => {
+  try {
+    const count = await Lead.countDocuments({
+      deletedAt: null,
+      presalesUserId: null,
+      salesUserId: null
+    });
+    
+    res.json({ count });
+  } catch (error) {
+    console.error('Error fetching unsigned leads:', error);
+    res.status(500).json({ error: 'Failed to fetch unsigned leads count' });
+  }
+});
+
 // Get dropdown data for form (must be before parameterized routes)
 router.get('/form/data', async (req, res) => {
   try {
@@ -151,7 +168,6 @@ router.get('/form/data', async (req, res) => {
       houseTypes,
       leadValues: [
         { value: 'high value', label: 'High Value' },
-        { value: 'medium value', label: 'Medium Value' },
         { value: 'low value', label: 'Low Value' }
       ]
     });
@@ -191,27 +207,21 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Lead source not found.' });
     }
 
-    // Create lead
-    const lead = new Lead();
-    await lead.save();
-
-    // Prepare lead activity data (filter out empty strings)
-    const leadActivityData = {
-      leadId: lead._id,
+    // Prepare lead data
+    const leadData = {
       name,
       email,
       contactNumber,
-      sourceId: leadSource._id
+      sourceId: leadSource._id,
+      comment
     };
     
     // Only add optional fields if they have values
-    if (comment) leadActivityData.comment = comment;
-
-    if (languageId) leadActivityData.languageId = languageId;
-    if (centreId) leadActivityData.centreId = centreId;
-    if (projectTypeId) leadActivityData.projectTypeId = projectTypeId;
-    if (houseTypeId) leadActivityData.houseTypeId = houseTypeId;
-    if (leadValue) leadActivityData.leadValue = leadValue;
+    if (languageId) leadData.languageId = languageId;
+    if (centreId) leadData.centreId = centreId;
+    if (projectTypeId) leadData.projectTypeId = projectTypeId;
+    if (houseTypeId) leadData.houseTypeId = houseTypeId;
+    if (leadValue) leadData.leadValue = leadValue;
 
     // Assign user and status based on assignment type
     if (assignmentType === 'presales') {
@@ -220,33 +230,39 @@ router.post('/', async (req, res) => {
       const presalesAgent = await getNextPresalesAgent(isCpSource);
       const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
       if (presalesAgent) {
-        leadActivityData.presalesUserId = presalesAgent._id;
+        leadData.presalesUserId = presalesAgent._id;
       }
       if (leadStatus) {
-        leadActivityData.leadStatusId = leadStatus._id;
+        leadData.leadStatusId = leadStatus._id;
       }
     } else if (assignmentType === 'sales') {
       const salesAgent = await getNextSalesAgent(centreId, languageId);
       const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
       const hotSubStatus = await Status.findOne({ slug: 'hot', type: 'leadSubStatus' });
       if (salesAgent) {
-        leadActivityData.salesUserId = salesAgent._id;
+        leadData.salesUserId = salesAgent._id;
       }
       if (qualifiedStatus) {
-        leadActivityData.leadStatusId = qualifiedStatus._id;
+        leadData.leadStatusId = qualifiedStatus._id;
       }
       if (hotSubStatus) {
-        leadActivityData.leadSubStatusId = hotSubStatus._id;
+        leadData.leadSubStatusId = hotSubStatus._id;
       }
     }
 
-    // Create lead activity
-    const leadActivity = new LeadActivity(leadActivityData);
+    // Create lead with all data
+    const lead = new Lead(leadData);
+    await lead.save();
+
+    // Create initial lead activity snapshot
+    const leadActivity = new LeadActivity({
+      leadId: lead._id,
+      ...leadData
+    });
     await leadActivity.save();
 
     // Populate the response
-    await leadActivity.populate([
-      { path: 'leadId' },
+    await lead.populate([
       { path: 'presalesUserId', select: 'name email' },
       { path: 'salesUserId', select: 'name email' },
       { path: 'languageId', select: 'name' },
@@ -260,7 +276,7 @@ router.post('/', async (req, res) => {
 
     res.status(201).json({
       message: 'Lead created successfully',
-      lead: leadActivity
+      lead: lead
     });
 
   } catch (error) {
@@ -290,20 +306,19 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
 
     const results = [];
     const errors = [];
+    const failedEntries = [];
     let rowNumber = 0;
-    const requiredColumns = ['name', 'email', 'contactNumber', 'comment'];
+    const requiredColumns = ['name', 'email', 'contactNumber', 'comment', 'leadSource'];
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const phoneRegex = /^[\d\s\+\-\(\)]{10,15}$/;
 
-    // Get default lead source
-    const defaultLeadSource = await LeadSource.findOne({ 
-      slug: 'excel', 
-      deletedAt: null 
-    });
-    if (!defaultLeadSource) {
+    // Get all lead sources for matching
+    const allLeadSources = await LeadSource.find({ deletedAt: null });
+    if (allLeadSources.length === 0) {
       fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'No lead source found. Please create a lead source first.' });
+      return res.status(400).json({ error: 'No lead sources found. Please create lead sources first.' });
     }
+
 
     // Parse CSV file
     const csvData = [];
@@ -366,50 +381,35 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
         const email = row.email ? row.email.toString().trim().toLowerCase() : '';
         const contactNumber = row.contactNumber ? row.contactNumber.toString().trim() : '';
         const comment = row.comment ? row.comment.toString().trim() : '';
+        const leadSourceText = row.leadSource ? row.leadSource.toString().trim() : '';
 
-        // Validate required fields
-        // if (!email) {
-        //   errors.push(`Row ${rowNumber}: Email is required`);
-        //   continue;
-        // }
-
+        // Validate required fields and collect failed entries
         if (!contactNumber) {
+          failedEntries.push({ ...row, failureReason: 'Contact number is required' });
           errors.push(`Row ${rowNumber}: Contact number is required`);
           continue;
         }
 
-        // Validate email format
-        // if (!emailRegex.test(email)) {
-        //   errors.push(`Row ${rowNumber}: Invalid email format (${email})`);
-        //   continue;
-        // }
+        if (!leadSourceText) {
+          failedEntries.push({ ...row, failureReason: 'Lead source is required' });
+          errors.push(`Row ${rowNumber}: Lead source is required`);
+          continue;
+        }
 
-        // Validate phone number format
         if (!phoneRegex.test(contactNumber)) {
+          failedEntries.push({ ...row, failureReason: 'Invalid contact number format' });
           errors.push(`Row ${rowNumber}: Invalid contact number format (${contactNumber})`);
           continue;
         }
 
-        // // Check for duplicate email in database
-        // if (existingEmails.has(email)) {
-        //   errors.push(`Row ${rowNumber}: Email already exists in database (${email})`);
-        //   continue;
-        // }
-
-        // Check for duplicate email in current upload
-        // if (uploadEmails.has(email)) {
-        //   errors.push(`Row ${rowNumber}: Duplicate email in upload file (${email})`);
-        //   continue;
-        // }
-
-        // Validate name length
         if (name && name.length > 100) {
+          failedEntries.push({ ...row, failureReason: 'Name too long (max 100 characters)' });
           errors.push(`Row ${rowNumber}: Name too long (max 100 characters)`);
           continue;
         }
 
-        // Validate comment length
         if (comment && comment.length > 500) {
+          failedEntries.push({ ...row, failureReason: 'Comment too long (max 500 characters)' });
           errors.push(`Row ${rowNumber}: Comment too long (max 500 characters)`);
           continue;
         }
@@ -417,34 +417,64 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
         // Add email to upload set
         uploadEmails.add(email);
 
-        // Create lead
-        const lead = new Lead();
-        await lead.save();
+        // Find matching lead source
+        let matchedLeadSource = null;
+        const leadSourceLower = leadSourceText.toLowerCase();
+        
+        // First try exact match
+        matchedLeadSource = allLeadSources.find(source => 
+          source.name.toLowerCase() === leadSourceLower ||
+          source.slug.toLowerCase() === leadSourceLower
+        );
+        
+        // If no exact match, try partial match
+        if (!matchedLeadSource) {
+          matchedLeadSource = allLeadSources.find(source => 
+            source.name.toLowerCase().includes(leadSourceLower) ||
+            leadSourceLower.includes(source.name.toLowerCase()) ||
+            source.slug.toLowerCase().includes(leadSourceLower) ||
+            leadSourceLower.includes(source.slug.toLowerCase())
+          );
+        }
+        
+        // Fail if no match found
+        if (!matchedLeadSource) {
+          failedEntries.push({ ...row, failureReason: `Lead source '${leadSourceText}' not found. Available sources: ${allLeadSources.map(s => s.name).join(', ')}` });
+          errors.push(`Row ${rowNumber}: Lead source '${leadSourceText}' not found`);
+          continue;
+        }
 
-        // Get next presales agent (round robin) - default to regular presales for bulk upload
-        const presalesAgent = await getNextPresalesAgent(false);
+        // Get next presales agent - check if matched source is CP
+        const isCpSource = matchedLeadSource.slug === 'cp' || matchedLeadSource.name.toLowerCase().includes('cp');
+        const presalesAgent = await getNextPresalesAgent(isCpSource);
         const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
 
-        // Prepare lead activity data
-        const leadActivityData = {
-          leadId: lead._id,
+        // Prepare lead data
+        const leadData = {
           name: name,
           email: email,
           contactNumber: contactNumber,
           comment: comment,
-          sourceId: defaultLeadSource._id
+          sourceId: matchedLeadSource._id
         };
 
         // Assign to presales agent
         if (presalesAgent) {
-          leadActivityData.presalesUserId = presalesAgent._id;
+          leadData.presalesUserId = presalesAgent._id;
         }
         if (leadStatus) {
-          leadActivityData.leadStatusId = leadStatus._id;
+          leadData.leadStatusId = leadStatus._id;
         }
 
-        // Create lead activity
-        const leadActivity = new LeadActivity(leadActivityData);
+        // Create lead with all data
+        const lead = new Lead(leadData);
+        await lead.save();
+
+        // Create initial lead activity snapshot
+        const leadActivity = new LeadActivity({
+          leadId: lead._id,
+          ...leadData
+        });
         await leadActivity.save();
 
         results.push({
@@ -453,17 +483,58 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
           name: name || 'N/A',
           email: email,
           contactNumber: contactNumber,
+          leadSource: matchedLeadSource.name,
           assignedTo: presalesAgent ? presalesAgent.name : 'Unassigned'
         });
 
       } catch (error) {
         console.error(`Error processing row ${rowNumber}:`, error);
-        errors.push(`Row ${rowNumber}: ${error.message}`);
+        const errorMessage = error.message || 'Unknown error occurred';
+        failedEntries.push({
+          ...row,
+          failureReason: errorMessage
+        });
+        errors.push(`Row ${rowNumber}: ${errorMessage}`);
       }
     }
 
     // Clean up uploaded file
     fs.unlinkSync(req.file.path);
+
+    // Generate failed entries CSV file if there are failures
+    let failedFileUrl = null;
+    if (failedEntries.length > 0) {
+      const timestamp = Date.now();
+      const failedFileName = `failed_leads_${timestamp}.csv`;
+      const failedFilePath = path.join(__dirname, '../uploads/csv', failedFileName);
+      
+      // Ensure directory exists
+      const uploadDir = path.join(__dirname, '../uploads/csv');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      
+      // Create CSV content with headers
+      const headers = ['name', 'email', 'contactNumber', 'comment', 'leadSource', 'failureReason'];
+      let csvContent = headers.join(',') + '\n';
+      
+      // Add failed entries data
+      failedEntries.forEach(entry => {
+        const row = [
+          `"${(entry.name || '').toString().replace(/"/g, '""')}"`,
+          `"${(entry.email || '').toString().replace(/"/g, '""')}"`,
+          `"${(entry.contactNumber || '').toString().replace(/"/g, '""')}"`,
+          `"${(entry.comment || '').toString().replace(/"/g, '""')}"`,
+          `"${(entry.leadSource || '').toString().replace(/"/g, '""')}"`,
+          `"${(entry.failureReason || '').toString().replace(/"/g, '""')}"`
+        ];
+        csvContent += row.join(',') + '\n';
+      });
+      
+      // Write CSV file
+      fs.writeFileSync(failedFilePath, csvContent, 'utf8');
+      failedFileUrl = `/api/leads/download-failed/${failedFileName}`;
+    }
 
     // Determine response status
     const totalRows = csvData.length;
@@ -476,7 +547,8 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
         totalRows,
         successful: successfulRows,
         failed: failedRows,
-        errors
+        errors,
+        failedFileUrl
       });
     }
 
@@ -486,7 +558,8 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
       successful: successfulRows,
       failed: failedRows,
       results,
-      errors
+      errors,
+      failedFileUrl
     };
 
     // Return partial success if some rows failed
@@ -522,52 +595,47 @@ router.get('/', authenticateToken, async (req, res) => {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
     
-    // Get unique lead IDs first, then get the latest activity for each
-    const pipeline = [
-      { $match: { deletedAt: null } },
-      { $sort: { createdAt: -1 } },
-      {
-        $group: {
-          _id: '$leadId',
-          latestActivity: { $first: '$$ROOT' }
-        }
-      },
-      { $replaceRoot: { newRoot: '$latestActivity' } }
-    ];
+    // Build filter for Lead table
+    const filter = { deletedAt: null };
     
-    // Apply filters to the pipeline - filter AFTER getting latest activity
-    const matchStage = { deletedAt: null };
-    
-    // Role-based filtering - apply after grouping
-    let postGroupFilter = {};
+    // Role-based filtering
     if (userRole === 'presales_agent') {
-      postGroupFilter = {
-        presalesUserId: new mongoose.Types.ObjectId(req.user.userId)
-      };
+      filter.presalesUserId = req.user.userId;
       const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
       if (leadStatus) {
-        postGroupFilter.leadStatusId = leadStatus._id;
+        filter.leadStatusId = leadStatus._id;
       }
     } else if (userRole === 'sales_agent') {
       const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
       const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
       
-      postGroupFilter = {
-        salesUserId: new mongoose.Types.ObjectId(req.user.userId),
-        leadStatusId: { 
+      filter.salesUserId = req.user.userId;
+      if (wonStatus || lostStatus) {
+        filter.leadStatusId = { 
           $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean)
-        }
-      };
+        };
+      }
     } else if (userRole === 'hod_presales' || userRole === 'manager_presales') {
       const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
       if (leadStatus) {
-        postGroupFilter.leadStatusId = leadStatus._id;
+        filter.leadStatusId = leadStatus._id;
+      }
+    } else if (userRole === 'hod_sales') {
+      // HOD sales can only see leads from their center
+      filter.centreId = user.centreId;
+    } else if (userRole === 'sales_manager') {
+      // Sales manager can only see qualified leads from their center
+      filter.centreId = user.centreId;
+      const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
+      if (qualifiedStatus) {
+        filter.leadStatusId = qualifiedStatus._id;
       }
     }
     
+    // Apply search filters
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, 'i');
-      matchStage.$or = [
+      filter.$or = [
         { name: searchRegex },
         { email: searchRegex },
         { contactNumber: searchRegex }
@@ -575,98 +643,64 @@ router.get('/', authenticateToken, async (req, res) => {
     }
     
     if (req.query.source) {
-      matchStage.sourceId = new mongoose.Types.ObjectId(req.query.source);
+      filter.sourceId = req.query.source;
     }
     
     if (req.query.leadValue) {
-      matchStage.leadValue = req.query.leadValue;
+      filter.leadValue = req.query.leadValue;
     }
     
     if (req.query.centre) {
-      matchStage.centreId = new mongoose.Types.ObjectId(req.query.centre);
+      filter.centreId = req.query.centre;
     }
     
     if (req.query.assignedTo) {
-      const assignedToId = new mongoose.Types.ObjectId(req.query.assignedTo);
-      matchStage.$or = [
-        { presalesUserId: assignedToId },
-        { salesUserId: assignedToId }
+      filter.$or = [
+        { presalesUserId: req.query.assignedTo },
+        { salesUserId: req.query.assignedTo }
       ];
     }
     
     if (req.query.leadStatus) {
-      matchStage.leadStatusId = new mongoose.Types.ObjectId(req.query.leadStatus);
+      filter.leadStatusId = req.query.leadStatus;
     }
     
     if (req.query.leadSubStatus) {
-      matchStage.leadSubStatusId = new mongoose.Types.ObjectId(req.query.leadSubStatus);
+      filter.leadSubStatusId = req.query.leadSubStatus;
     }
     
     // Date range filters
     if (req.query.dateFrom || req.query.dateTo) {
-      matchStage.createdAt = {};
+      filter.createdAt = {};
       if (req.query.dateFrom) {
-        matchStage.createdAt.$gte = new Date(req.query.dateFrom);
+        filter.createdAt.$gte = new Date(req.query.dateFrom);
       }
       if (req.query.dateTo) {
         const toDate = new Date(req.query.dateTo);
-        toDate.setHours(23, 59, 59, 999); // End of day
-        matchStage.createdAt.$lte = toDate;
+        toDate.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = toDate;
       }
     }
 
-    pipeline[0].$match = matchStage;
-    
-    // Add post-group filtering for role-based access
-    if (Object.keys(postGroupFilter).length > 0) {
-      pipeline.push({ $match: postGroupFilter });
-    }
-    
-    // Add pagination
-    pipeline.push(
-      { $sort: { createdAt: -1 } },
-      { $skip: skip },
-      { $limit: limit }
-    );
-
-    const leads = await LeadActivity.aggregate(pipeline);
-    
-    // Populate the results
-    await LeadActivity.populate(leads, [
-      { path: 'leadId' },
-      { path: 'presalesUserId', select: 'name email' },
-      { path: 'salesUserId', select: 'name email' },
-      { path: 'languageId', select: 'name' },
-      { path: 'sourceId', select: 'name' },
-      { path: 'projectTypeId', select: 'name type' },
-      { path: 'houseTypeId', select: 'name type' },
-      { path: 'centreId', select: 'name' },
-      { path: 'leadStatusId', select: 'name slug' },
-      { path: 'leadSubStatusId', select: 'name slug' }
+    // Get leads from Lead table
+    const [leads, total] = await Promise.all([
+      Lead.find(filter)
+        .populate([
+          { path: 'presalesUserId', select: 'name email' },
+          { path: 'salesUserId', select: 'name email' },
+          { path: 'languageId', select: 'name' },
+          { path: 'sourceId', select: 'name' },
+          { path: 'projectTypeId', select: 'name type' },
+          { path: 'houseTypeId', select: 'name type' },
+          { path: 'centreId', select: 'name' },
+          { path: 'leadStatusId', select: 'name slug' },
+          { path: 'leadSubStatusId', select: 'name slug' }
+        ])
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Lead.countDocuments(filter)
     ]);
-
-    // Get total count for pagination
-    const totalPipeline = [
-      { $match: matchStage },
-      { $sort: { createdAt: -1 } },
-      {
-        $group: {
-          _id: '$leadId',
-          latestActivity: { $first: '$$ROOT' }
-        }
-      },
-      { $replaceRoot: { newRoot: '$latestActivity' } }
-    ];
-    
-    // Add post-group filtering for total count too
-    if (Object.keys(postGroupFilter).length > 0) {
-      totalPipeline.push({ $match: postGroupFilter });
-    }
-    
-    totalPipeline.push({ $count: 'total' });
-    
-    const totalResult = await LeadActivity.aggregate(totalPipeline);
-    const total = totalResult.length > 0 ? totalResult[0].total : 0;
 
     res.json({
       leads,
@@ -687,9 +721,8 @@ router.get('/', authenticateToken, async (req, res) => {
 // Export leads
 router.get('/export', async (req, res) => {
   try {
-    const leads = await LeadActivity.find({ deletedAt: null })
+    const leads = await Lead.find({ deletedAt: null })
       .populate([
-        { path: 'leadId' },
         { path: 'presalesUserId', select: 'name email' },
         { path: 'salesUserId', select: 'name email' },
         { path: 'languageId', select: 'name' },
@@ -703,7 +736,7 @@ router.get('/export', async (req, res) => {
       .sort({ createdAt: -1 });
 
     const csvData = leads.map(lead => ({
-      'Lead ID': lead.leadId.leadID,
+      'Lead ID': lead.leadID,
       'Name': lead.name || '',
       'Email': lead.email,
       'Contact Number': lead.contactNumber,
@@ -716,7 +749,6 @@ router.get('/export', async (req, res) => {
       'Project Type': lead.projectTypeId?.name || '',
       'House Type': lead.houseTypeId?.name || '',
       'Comment': lead.comment || '',
-
       'Created At': new Date(lead.createdAt).toLocaleString()
     }));
 
@@ -730,29 +762,14 @@ router.get('/export', async (req, res) => {
 // Get all lead activities for a lead
 router.get('/:id/activities', authenticateToken, async (req, res) => {
   try {
-    // Determine the actual Lead ID
-    let actualLeadId = null;
-    
-    // Try to find as LeadActivity first
-    try {
-      const leadActivity = await LeadActivity.findById(req.params.id);
-      if (leadActivity) {
-        actualLeadId = leadActivity.leadId;
-      }
-    } catch (err) {
-      // If not found as LeadActivity, try as Lead ID directly
-      const lead = await Lead.findById(req.params.id);
-      if (lead) {
-        actualLeadId = lead._id;
-      }
-    }
-
-    if (!actualLeadId) {
+    // Check if the lead exists
+    const lead = await Lead.findById(req.params.id);
+    if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
     }
 
     // Get all lead activities for this lead
-    const leadActivities = await LeadActivity.find({ leadId: actualLeadId, deletedAt: null })
+    const leadActivities = await LeadActivity.find({ leadId: req.params.id, deletedAt: null })
       .populate([
         { path: 'presalesUserId', select: 'name email' },
         { path: 'salesUserId', select: 'name email' },
@@ -777,68 +794,57 @@ router.get('/:id/activities', authenticateToken, async (req, res) => {
 // Get lead by ID with activity data
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
-    // First check if the ID is a LeadActivity ID or Lead ID
-    let leadActivity = null;
-    let actualLeadId = null;
+    // Get user role for access control
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
     
-    // Try to find as LeadActivity first (for backward compatibility)
-    try {
-      leadActivity = await LeadActivity.findById(req.params.id)
-        .populate([
-          { path: 'leadId' },
-          { path: 'presalesUserId', select: 'name email' },
-          { path: 'salesUserId', select: 'name email' },
-          { path: 'languageId', select: 'name' },
-          { path: 'sourceId', select: 'name' },
-          { path: 'projectTypeId', select: 'name type' },
-          { path: 'houseTypeId', select: 'name type' },
-          { path: 'centreId', select: 'name' },
-          { path: 'leadStatusId', select: 'name slug' },
-          { path: 'leadSubStatusId', select: 'name slug' }
-        ]);
-      
-      if (leadActivity) {
-        actualLeadId = leadActivity.leadId._id;
-      }
-    } catch (err) {
-      // If not found as LeadActivity, try as Lead ID directly
-      const lead = await Lead.findById(req.params.id);
-      if (lead) {
-        actualLeadId = lead._id;
-        // Get the latest LeadActivity for this lead
-        leadActivity = await LeadActivity.findOne({ leadId: actualLeadId, deletedAt: null })
-          .populate([
-            { path: 'leadId' },
-            { path: 'presalesUserId', select: 'name email' },
-            { path: 'salesUserId', select: 'name email' },
-            { path: 'languageId', select: 'name' },
-            { path: 'sourceId', select: 'name' },
-            { path: 'projectTypeId', select: 'name type' },
-            { path: 'houseTypeId', select: 'name type' },
-            { path: 'centreId', select: 'name' },
-            { path: 'leadStatusId', select: 'name slug' },
-            { path: 'leadSubStatusId', select: 'name slug' }
-          ])
-          .sort({ createdAt: -1 });
-      }
-    }
+    // Find the lead
+    const lead = await Lead.findById(req.params.id)
+      .populate([
+        { path: 'presalesUserId', select: 'name email' },
+        { path: 'salesUserId', select: 'name email' },
+        { path: 'updatedPerson', select: 'name email' },
+        { path: 'languageId', select: 'name' },
+        { path: 'sourceId', select: 'name' },
+        { path: 'projectTypeId', select: 'name type' },
+        { path: 'houseTypeId', select: 'name type' },
+        { path: 'centreId', select: 'name' },
+        { path: 'leadStatusId', select: 'name slug' },
+        { path: 'leadSubStatusId', select: 'name slug' }
+      ]);
 
-    if (!leadActivity || !actualLeadId) {
+    if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
     }
+    
+    // Check center access for HOD sales
+    if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
+      return res.status(403).json({ error: 'Access denied: Lead not from your center' });
+    }
+    
+    // Check center and qualified status access for sales manager
+    if (userRole === 'sales_manager') {
+      if (!lead.centreId || !lead.centreId.equals(user.centreId)) {
+        return res.status(403).json({ error: 'Access denied: Lead not from your center' });
+      }
+      const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
+      if (!qualifiedStatus || !lead.leadStatusId.equals(qualifiedStatus._id)) {
+        return res.status(403).json({ error: 'Access denied: Only qualified leads allowed' });
+      }
+    }
 
-    // Get call logs linked to the actual Lead
-    const callLogs = await CallLog.find({ leadId: actualLeadId, deletedAt: null })
+    // Get call logs linked to the Lead
+    const callLogs = await CallLog.find({ leadId: lead._id, deletedAt: null })
       .populate('userId', 'name email')
       .sort({ createdAt: -1 });
 
-    // Get activity logs linked to the actual Lead
-    const activityLogs = await ActivityLog.find({ leadId: actualLeadId, deletedAt: null })
+    // Get activity logs linked to the Lead
+    const activityLogs = await ActivityLog.find({ leadId: lead._id, deletedAt: null })
       .populate('userId', 'name email')
       .sort({ createdAt: -1 });
 
     res.json({
-      lead: leadActivity,
+      lead: lead,
       callLogs,
       activityLogs
     });
@@ -851,26 +857,18 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Get lead activity timeline
 router.get('/:id/timeline', authenticateToken, async (req, res) => {
   try {
-    // Determine the actual Lead ID
-    let actualLeadId = null;
-    
-    // Try to find as LeadActivity first
-    try {
-      const leadActivity = await LeadActivity.findById(req.params.id);
-      if (leadActivity) {
-        actualLeadId = leadActivity.leadId;
-      }
-    } catch (err) {
-      // If not found as LeadActivity, try as Lead ID directly
-      const lead = await Lead.findById(req.params.id);
-      if (lead) {
-        actualLeadId = lead._id;
-      }
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid lead ID format' });
     }
 
-    if (!actualLeadId) {
+    // Find the lead directly
+    const lead = await Lead.findById(req.params.id);
+    if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
     }
+
+    const actualLeadId = lead._id;
 
     // Get call logs linked to the actual Lead
     const callLogs = await CallLog.find({ leadId: actualLeadId, deletedAt: null })
@@ -1002,69 +1000,68 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
     console.log('Presales activity endpoint called with:', req.params.id);
     console.log('Request body:', req.body);
     
-    // Determine the actual Lead ID
-    let actualLeadId = null;
-    let existingLeadActivity = null;
+    // Get user role for access control
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
     
-    // Try to find as LeadActivity first
-    try {
-      existingLeadActivity = await LeadActivity.findById(req.params.id);
-      if (existingLeadActivity) {
-        actualLeadId = existingLeadActivity.leadId;
-      }
-    } catch (err) {
-      // If not found as LeadActivity, try as Lead ID directly
-      const lead = await Lead.findById(req.params.id);
-      if (lead) {
-        actualLeadId = lead._id;
-        existingLeadActivity = await LeadActivity.findOne({ leadId: actualLeadId, deletedAt: null })
-          .sort({ createdAt: -1 });
-      }
-    }
-
-    if (!actualLeadId || !existingLeadActivity) {
-      console.log('Lead not found:', { actualLeadId, existingLeadActivity });
+    // Find the lead
+    const lead = await Lead.findById(req.params.id);
+    if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
     }
+    
+    // Check center access for HOD sales
+    if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
+      return res.status(403).json({ error: 'Access denied: Lead not from your center' });
+    }
+    
+    // Check center and qualified status access for sales manager
+    if (userRole === 'sales_manager') {
+      if (!lead.centreId || !lead.centreId.equals(user.centreId)) {
+        return res.status(403).json({ error: 'Access denied: Lead not from your center' });
+      }
+      const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
+      if (!qualifiedStatus || !lead.leadStatusId.equals(qualifiedStatus._id)) {
+        return res.status(403).json({ error: 'Access denied: Only qualified leads allowed' });
+      }
+    }
 
-    console.log('Found lead:', actualLeadId);
+    console.log('Found lead:', lead._id);
 
-    // Prepare new lead activity data with limited fields for presales
-    const newLeadActivityData = {
-      leadId: actualLeadId,
-      name: req.body.name || existingLeadActivity.name,
-      email: req.body.email || existingLeadActivity.email,
-      contactNumber: req.body.contactNumber || existingLeadActivity.contactNumber,
-      sourceId: existingLeadActivity.sourceId, // Keep original source (disabled for presales)
-      leadStatusId: req.body.leadStatusId || existingLeadActivity.leadStatusId,
-      centreId: req.body.centreId || existingLeadActivity.centreId,
-      languageId: req.body.languageId || existingLeadActivity.languageId,
-      projectTypeId: req.body.projectTypeId || existingLeadActivity.projectTypeId,
-      houseTypeId: req.body.houseTypeId || existingLeadActivity.houseTypeId,
-      apartmentName: req.body.apartmentName || existingLeadActivity.apartmentName,
-      leadValue: req.body.leadValue || existingLeadActivity.leadValue,
-      comment: req.body.comment || '',
+    // Prepare updated lead data with limited fields for presales
+    const updatedData = {
+      name: req.body.name || lead.name,
+      email: req.body.email || lead.email,
+      contactNumber: req.body.contactNumber || lead.contactNumber,
+      leadStatusId: req.body.leadStatusId || lead.leadStatusId,
+      leadSubStatusId: req.body.leadSubStatusId || lead.leadSubStatusId,
+      centreId: req.body.centreId || lead.centreId,
+      languageId: req.body.languageId || lead.languageId,
+      projectTypeId: req.body.projectTypeId || lead.projectTypeId,
+      houseTypeId: req.body.houseTypeId || lead.houseTypeId,
+      apartmentName: req.body.apartmentName || lead.apartmentName,
+      leadValue: req.body.leadValue || lead.leadValue,
+      comment: req.body.comment || lead.comment,
       updatedPerson: req.user.userId,
-      // Keep existing values for other fields
-      presalesUserId: existingLeadActivity.presalesUserId,
-      salesUserId: existingLeadActivity.salesUserId,
-      leadSubStatusId: existingLeadActivity.leadSubStatusId,
-      projectValue: existingLeadActivity.projectValue,
-      expectedPossessionDate: existingLeadActivity.expectedPossessionDate,
-      paymentMethod: existingLeadActivity.paymentMethod,
-      siteVisit: existingLeadActivity.siteVisit,
-      siteVisitDate: existingLeadActivity.siteVisitDate,
-      centerVisit: existingLeadActivity.centerVisit,
-      centerVisitDate: existingLeadActivity.centerVisitDate,
-      virtualMeeting: existingLeadActivity.virtualMeeting,
-      virtualMeetingDate: existingLeadActivity.virtualMeetingDate,
-      cifDate: existingLeadActivity.cifDate,
-
+      files: lead.files
     };
+
+    // Handle date fields
+    if (req.body.cifDate !== undefined) {
+      updatedData.cifDate = req.body.cifDate ? new Date(req.body.cifDate) : null;
+    } else {
+      updatedData.cifDate = lead.cifDate;
+    }
+    
+    if (req.body.meetingArrangedDate !== undefined) {
+      updatedData.meetingArrangedDate = req.body.meetingArrangedDate ? new Date(req.body.meetingArrangedDate) : null;
+    } else {
+      updatedData.meetingArrangedDate = lead.meetingArrangedDate;
+    }
 
     // Handle file uploads
     if (req.files && req.files.length > 0) {
-      newLeadActivityData.files = req.files.map(file => ({
+      updatedData.files = req.files.map(file => ({
         filename: file.filename,
         originalname: file.originalname,
         size: file.size,
@@ -1072,7 +1069,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
       }));
     }
 
-    // Check if lead status changed to qualified
+    // Check if lead status changed
     if (req.body.leadStatusId) {
       const leadStatus = await Status.findById(req.body.leadStatusId);
       console.log('Lead status check:', leadStatus?.slug);
@@ -1081,31 +1078,46 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
         console.log('Lead status changed to qualified, assigning to sales team');
         
         // Auto-assign to sales team using round robin with centre and language
-        const salesAgent = await getNextSalesAgent(newLeadActivityData.centreId, newLeadActivityData.languageId);
+        const salesAgent = await getNextSalesAgent(updatedData.centreId, updatedData.languageId);
         if (salesAgent) {
           console.log('Assigned to sales agent:', salesAgent.name);
-          newLeadActivityData.salesUserId = salesAgent._id;
-          newLeadActivityData.presalesUserId = null; // Clear presales assignment
+          updatedData.salesUserId = salesAgent._id;
+          updatedData.presalesUserId = null; // Clear presales assignment
         }
         
         // Set sub-status to hot
         const hotSubStatus = await Status.findOne({ slug: 'hot', type: 'leadSubStatus' });
         if (hotSubStatus) {
           console.log('Set sub-status to hot');
-          newLeadActivityData.leadSubStatusId = hotSubStatus._id;
+          updatedData.leadSubStatusId = hotSubStatus._id;
         }
+      } else if (leadStatus && leadStatus.slug === 'won') {
+        console.log('Lead status changed to won');
+        updatedData.leadWonDate = new Date();
+        updatedData.leadSubStatusId = null;
+        updatedData.presalesUserId = null;
+        updatedData.salesUserId = null;
+        updatedData.cifDate = null;
+        updatedData.meetingArrangedDate = null;
+      } else if (leadStatus && leadStatus.slug === 'lost') {
+        console.log('Lead status changed to lost');
+        updatedData.leadLostDate = new Date();
+        updatedData.leadSubStatusId = null;
+        updatedData.presalesUserId = null;
+        updatedData.salesUserId = null;
+        updatedData.cifDate = null;
+        updatedData.meetingArrangedDate = null;
       }
     }
 
-    console.log('Creating new lead activity with data:', newLeadActivityData);
+    console.log('Updating lead with data:', updatedData);
 
-    // Create new lead activity
-    const newLeadActivity = new LeadActivity(newLeadActivityData);
-    await newLeadActivity.save();
+    // Update the lead (this will trigger the pre-save hook to create LeadActivity snapshot)
+    Object.assign(lead, updatedData);
+    await lead.save();
 
     // Populate the response
-    await newLeadActivity.populate([
-      { path: 'leadId' },
+    await lead.populate([
       { path: 'presalesUserId', select: 'name email' },
       { path: 'salesUserId', select: 'name email' },
       { path: 'updatedPerson', select: 'name email' },
@@ -1118,14 +1130,14 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
       { path: 'leadSubStatusId', select: 'name slug' }
     ]);
 
-    console.log('Lead activity created successfully');
+    console.log('Lead updated successfully');
 
-    res.status(201).json({ 
+    res.status(200).json({ 
       message: 'Lead updated successfully', 
-      leadActivity: newLeadActivity 
+      lead: lead 
     });
   } catch (error) {
-    console.error('Error creating presales lead activity:', error);
+    console.error('Error updating lead:', error);
     res.status(500).json({ error: 'Failed to update lead' });
   }
 });
@@ -1133,38 +1145,38 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
 // Create new lead activity entry
 router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files', 5), async (req, res) => {
   try {
-    // Determine the actual Lead ID
-    let actualLeadId = null;
-    let existingLeadActivity = null;
+    // Get user role for access control
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
     
-    // Try to find as LeadActivity first
-    try {
-      existingLeadActivity = await LeadActivity.findById(req.params.id);
-      if (existingLeadActivity) {
-        actualLeadId = existingLeadActivity.leadId;
-      }
-    } catch (err) {
-      // If not found as LeadActivity, try as Lead ID directly
-      const lead = await Lead.findById(req.params.id);
-      if (lead) {
-        actualLeadId = lead._id;
-        // Get the latest LeadActivity for this lead to copy data
-        existingLeadActivity = await LeadActivity.findOne({ leadId: actualLeadId, deletedAt: null })
-          .sort({ createdAt: -1 });
-      }
-    }
-
-    if (!actualLeadId || !existingLeadActivity) {
+    // Find the lead
+    const lead = await Lead.findById(req.params.id);
+    if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
     }
+    
+    // Check center access for HOD sales
+    if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
+      return res.status(403).json({ error: 'Access denied: Lead not from your center' });
+    }
+    
+    // Check center and qualified status access for sales manager
+    if (userRole === 'sales_manager') {
+      if (!lead.centreId || !lead.centreId.equals(user.centreId)) {
+        return res.status(403).json({ error: 'Access denied: Lead not from your center' });
+      }
+      const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
+      if (!qualifiedStatus || !lead.leadStatusId.equals(qualifiedStatus._id)) {
+        return res.status(403).json({ error: 'Access denied: Only qualified leads allowed' });
+      }
+    }
 
-    // Prepare new lead activity data, copying from existing and updating with new data
-    const newLeadActivityData = {
-      leadId: actualLeadId,
-      name: req.body.name || existingLeadActivity.name,
-      email: req.body.email || existingLeadActivity.email,
-      contactNumber: req.body.contactNumber || existingLeadActivity.contactNumber,
-      sourceId: req.body.sourceId || existingLeadActivity.sourceId,
+    // Prepare updated lead data
+    const updatedData = {
+      name: req.body.name || lead.name,
+      email: req.body.email || lead.email,
+      contactNumber: req.body.contactNumber || lead.contactNumber,
+      sourceId: req.body.sourceId || lead.sourceId,
       updatedPerson: req.user.userId
     };
 
@@ -1172,29 +1184,35 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
     const fieldsToUpdate = [
       'presalesUserId', 'salesUserId', 'leadStatusId', 'leadSubStatusId',
       'languageId', 'centreId', 'projectTypeId', 'projectValue', 'apartmentName',
-      'houseTypeId', 'expectedPossessionDate', 'leadValue', 'paymentMethod',
+      'houseTypeId', 'expectedPossessionDate', 'leadValue',
       'siteVisit', 'siteVisitDate', 'centerVisit', 'centerVisitDate',
-      'virtualMeeting', 'virtualMeetingDate', 'comment', 'cifDate'
+      'virtualMeeting', 'virtualMeetingDate', 'meetingArrangedDate', 'comment', 'cifDate'
     ];
 
     fieldsToUpdate.forEach(field => {
       if (req.body[field] !== undefined) {
-        newLeadActivityData[field] = req.body[field] || null;
+        updatedData[field] = req.body[field] || null;
       } else {
-        newLeadActivityData[field] = existingLeadActivity[field];
+        updatedData[field] = lead[field];
       }
     });
 
-    // Handle CIF date field
+    // Handle date fields
     if (req.body.cifDate !== undefined) {
-      newLeadActivityData.cifDate = req.body.cifDate ? new Date(req.body.cifDate) : null;
+      updatedData.cifDate = req.body.cifDate ? new Date(req.body.cifDate) : null;
     } else {
-      newLeadActivityData.cifDate = existingLeadActivity.cifDate;
+      updatedData.cifDate = lead.cifDate;
+    }
+    
+    if (req.body.meetingArrangedDate !== undefined) {
+      updatedData.meetingArrangedDate = req.body.meetingArrangedDate ? new Date(req.body.meetingArrangedDate) : null;
+    } else {
+      updatedData.meetingArrangedDate = lead.meetingArrangedDate;
     }
 
     // Handle file uploads
     if (req.files && req.files.length > 0) {
-      newLeadActivityData.files = req.files.map(file => ({
+      updatedData.files = req.files.map(file => ({
         filename: file.filename,
         originalname: file.originalname,
         size: file.size,
@@ -1202,35 +1220,48 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       }));
     }
 
-    // Check if lead status changed to qualified and assign to sales team
+    // Check if lead status changed and handle accordingly
     if (req.body.leadStatusId) {
       const leadStatus = await Status.findById(req.body.leadStatusId);
       if (leadStatus && leadStatus.slug === 'qualified') {
         // Assign to sales agent using round robin
-        const salesAgent = await getNextSalesAgent(newLeadActivityData.centreId, newLeadActivityData.languageId);
+        const salesAgent = await getNextSalesAgent(updatedData.centreId, updatedData.languageId);
         if (salesAgent) {
-          newLeadActivityData.salesUserId = salesAgent._id;
+          updatedData.salesUserId = salesAgent._id;
           // Clear presales assignment when moving to sales
-          newLeadActivityData.presalesUserId = null;
+          updatedData.presalesUserId = null;
         }
         
         // Set default sub-status for qualified leads
         if (!req.body.leadSubStatusId) {
           const hotSubStatus = await Status.findOne({ slug: 'hot', type: 'leadSubStatus' });
           if (hotSubStatus) {
-            newLeadActivityData.leadSubStatusId = hotSubStatus._id;
+            updatedData.leadSubStatusId = hotSubStatus._id;
           }
         }
+      } else if (leadStatus && leadStatus.slug === 'won') {
+        updatedData.leadWonDate = new Date();
+        updatedData.leadSubStatusId = null;
+        updatedData.presalesUserId = null;
+        updatedData.salesUserId = null;
+        updatedData.cifDate = null;
+        updatedData.meetingArrangedDate = null;
+      } else if (leadStatus && leadStatus.slug === 'lost') {
+        updatedData.leadLostDate = new Date();
+        updatedData.leadSubStatusId = null;
+        updatedData.presalesUserId = null;
+        updatedData.salesUserId = null;
+        updatedData.cifDate = null;
+        updatedData.meetingArrangedDate = null;
       }
     }
 
-    // Create new lead activity
-    const newLeadActivity = new LeadActivity(newLeadActivityData);
-    await newLeadActivity.save();
+    // Update the lead (this will trigger the pre-save hook to create LeadActivity snapshot)
+    Object.assign(lead, updatedData);
+    await lead.save();
 
     // Populate the response
-    await newLeadActivity.populate([
-      { path: 'leadId' },
+    await lead.populate([
       { path: 'presalesUserId', select: 'name email' },
       { path: 'salesUserId', select: 'name email' },
       { path: 'updatedPerson', select: 'name email' },
@@ -1243,36 +1274,55 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       { path: 'leadSubStatusId', select: 'name slug' }
     ]);
 
-    res.status(201).json({ 
-      message: 'Lead activity created successfully', 
-      leadActivity: newLeadActivity 
+    res.status(200).json({ 
+      message: 'Lead updated successfully', 
+      lead: lead 
     });
   } catch (error) {
-    console.error('Error creating lead activity:', error);
-    res.status(500).json({ error: 'Failed to create lead activity' });
+    console.error('Error updating lead:', error);
+    res.status(500).json({ error: 'Failed to update lead' });
   }
 });
 
 // Update lead
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const leadActivity = await LeadActivity.findById(req.params.id);
-    if (!leadActivity) {
+    // Get user role for access control
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+    
+    const lead = await Lead.findById(req.params.id);
+    if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
+    }
+    
+    // Check center access for HOD sales
+    if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
+      return res.status(403).json({ error: 'Access denied: Lead not from your center' });
+    }
+    
+    // Check center and qualified status access for sales manager
+    if (userRole === 'sales_manager') {
+      if (!lead.centreId || !lead.centreId.equals(user.centreId)) {
+        return res.status(403).json({ error: 'Access denied: Lead not from your center' });
+      }
+      const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
+      if (!qualifiedStatus || !lead.leadStatusId.equals(qualifiedStatus._id)) {
+        return res.status(403).json({ error: 'Access denied: Only qualified leads allowed' });
+      }
     }
 
     // Update fields
     Object.keys(req.body).forEach(key => {
       if (req.body[key] !== undefined && req.body[key] !== '') {
-        leadActivity[key] = req.body[key];
+        lead[key] = req.body[key];
       }
     });
 
-    await leadActivity.save();
+    await lead.save();
     
     // Populate the response
-    await leadActivity.populate([
-      { path: 'leadId' },
+    await lead.populate([
       { path: 'presalesUserId', select: 'name email' },
       { path: 'salesUserId', select: 'name email' },
       { path: 'languageId', select: 'name' },
@@ -1284,7 +1334,7 @@ router.put('/:id', async (req, res) => {
       { path: 'leadSubStatusId', select: 'name slug' }
     ]);
 
-    res.json({ message: 'Lead updated successfully', lead: leadActivity });
+    res.json({ message: 'Lead updated successfully', lead: lead });
   } catch (error) {
     console.error('Error updating lead:', error);
     res.status(500).json({ error: 'Failed to update lead' });
@@ -1294,14 +1344,20 @@ router.put('/:id', async (req, res) => {
 // Delete lead
 router.delete('/:id', async (req, res) => {
   try {
-    const leadActivity = await LeadActivity.findById(req.params.id);
-    if (!leadActivity) {
+    const lead = await Lead.findById(req.params.id);
+    if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
     }
 
-    // Soft delete
-    leadActivity.deletedAt = new Date();
-    await leadActivity.save();
+    // Soft delete the lead
+    lead.deletedAt = new Date();
+    await lead.save();
+
+    // Also soft delete all related lead activities
+    await LeadActivity.updateMany(
+      { leadId: lead._id, deletedAt: null },
+      { deletedAt: new Date() }
+    );
 
     res.json({ message: 'Lead deleted successfully' });
   } catch (error) {
@@ -1310,70 +1366,148 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// Change language and reassign lead
-router.post('/:id/change-language', authenticateToken, async (req, res) => {
+// Assign lead to user
+router.post('/:id/assign', authenticateToken, async (req, res) => {
   try {
-    const { languageId, presalesUserId } = req.body;
+    const { presalesUserId, salesUserId } = req.body;
     
-    if (!languageId || !presalesUserId) {
-      return res.status(400).json({ error: 'Language ID and Presales User ID are required' });
-    }
-
-    // Find existing lead activity
-    let existingLeadActivity = null;
-    let actualLeadId = null;
-    
-    try {
-      existingLeadActivity = await LeadActivity.findById(req.params.id);
-      if (existingLeadActivity) {
-        actualLeadId = existingLeadActivity.leadId;
-      }
-    } catch (err) {
-      const lead = await Lead.findById(req.params.id);
-      if (lead) {
-        actualLeadId = lead._id;
-        existingLeadActivity = await LeadActivity.findOne({ leadId: actualLeadId, deletedAt: null })
-          .sort({ createdAt: -1 });
-      }
-    }
-
-    if (!actualLeadId || !existingLeadActivity) {
+    const lead = await Lead.findById(req.params.id);
+    if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
     }
 
-    // Create new lead activity with language change
-    const newLeadActivityData = {
-      ...existingLeadActivity.toObject(),
-      _id: undefined,
-      languageId,
-      presalesUserId,
-      comment: 'Language changed and lead reassigned',
-      updatedPerson: req.user.userId,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
+    const updateData = {};
+    if (presalesUserId) updateData.presalesUserId = presalesUserId;
+    if (salesUserId) updateData.salesUserId = salesUserId;
+    updateData.updatedPerson = req.user.userId;
 
-    const newLeadActivity = new LeadActivity(newLeadActivityData);
-    await newLeadActivity.save();
+    Object.assign(lead, updateData);
+    await lead.save();
 
-    await newLeadActivity.populate([
-      { path: 'leadId' },
+    await lead.populate([
+      { path: 'presalesUserId', select: 'name email' },
+      { path: 'salesUserId', select: 'name email' }
+    ]);
+
+    res.json({ message: 'Lead assigned successfully', lead });
+  } catch (error) {
+    console.error('Error assigning lead:', error);
+    res.status(500).json({ error: 'Failed to assign lead' });
+  }
+});
+
+// Helper function to get next presales agent for specific language using dedicated round-robin
+async function getNextPresalesAgentForLanguage(languageId) {
+  const presalesRole = await Role.findOne({ slug: 'presales_agent' });
+  const activeStatus = await Status.findOne({ slug: 'active' });
+  if (!presalesRole || !activeStatus) return null;
+
+  const presalesAgents = await User.find({ 
+    roleId: presalesRole._id,
+    statusId: activeStatus._id,
+    languageIds: languageId,
+    deletedAt: null 
+  }).sort({ name: 1 });
+  
+  if (presalesAgents.length === 0) return null;
+  
+  if (!languageRoundRobin[languageId]) {
+    languageRoundRobin[languageId] = 0;
+  }
+  
+  const agent = presalesAgents[languageRoundRobin[languageId] % presalesAgents.length];
+  languageRoundRobin[languageId]++;
+  
+  return agent;
+}
+
+// Helper function to check if user can handle specific language
+function userCanHandleLanguage(user, languageId) {
+  if (!user.languageIds || !languageId) return false;
+  return user.languageIds.some(lang => 
+    (typeof lang === 'string' ? lang : lang._id || lang).toString() === languageId.toString()
+  );
+}
+
+// Change language with automatic assignment logic
+router.post('/:id/change-language', authenticateToken, async (req, res) => {
+  try {
+    const { languageId } = req.body;
+    
+    if (!languageId) {
+      return res.status(400).json({ error: 'Language ID is required' });
+    }
+
+    const lead = await Lead.findById(req.params.id);
+    if (!lead || lead.deletedAt) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    const currentUser = await User.findById(req.user.userId);
+    if (!currentUser) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    let assignedUserId = null;
+    let assignmentMessage = '';
+
+    const canHandleLanguage = userCanHandleLanguage(currentUser, languageId);
+
+    if (canHandleLanguage) {
+      assignedUserId = currentUser._id;
+      assignmentMessage = 'Language changed. Lead remains with current user.';
+    } else {
+      const availableAgent = await getNextPresalesAgentForLanguage(languageId);
+      
+      if (availableAgent) {
+        assignedUserId = availableAgent._id;
+        assignmentMessage = `Language changed. Lead reassigned to ${availableAgent.name} via round-robin.`;
+      } else {
+        assignedUserId = currentUser._id;
+        assignmentMessage = 'Language changed. No agents available for this language, lead remains with current user.';
+      }
+    }
+
+    lead.languageId = languageId;
+    lead.presalesUserId = assignedUserId;
+    lead.updatedPerson = req.user.userId;
+    lead.comment = assignmentMessage;
+    
+    await lead.save();
+
+    await lead.populate([
       { path: 'presalesUserId', select: 'name email' },
       { path: 'salesUserId', select: 'name email' },
       { path: 'languageId', select: 'name' },
       { path: 'sourceId', select: 'name' },
+      { path: 'projectTypeId', select: 'name type' },
+      { path: 'houseTypeId', select: 'name type' },
       { path: 'centreId', select: 'name' },
       { path: 'leadStatusId', select: 'name slug' },
       { path: 'leadSubStatusId', select: 'name slug' }
     ]);
 
-    res.status(201).json({ 
-      message: 'Language changed and lead reassigned successfully', 
-      leadActivity: newLeadActivity 
+    res.json({ 
+      message: assignmentMessage,
+      lead: lead
     });
   } catch (error) {
     console.error('Error changing language:', error);
     res.status(500).json({ error: 'Failed to change language' });
+  }
+});
+
+// Download failed entries CSV file
+router.get('/download-failed/:filename', (req, res) => {
+  const filename = req.params.filename;
+  const filePath = path.join(__dirname, '../uploads/csv', filename);
+  
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.sendFile(filePath);
+  } else {
+    res.status(404).json({ error: 'Failed entries file not found' });
   }
 });
 

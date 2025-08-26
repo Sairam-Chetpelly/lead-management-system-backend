@@ -26,6 +26,7 @@ const seedData = async () => {
     ]);
     console.log('Cleared existing data');
 
+    // Roles
     const roles = [
       { name: 'Admin', slug: 'admin' },
       { name: 'HOD Presales', slug: 'hod_presales' },
@@ -37,6 +38,8 @@ const seedData = async () => {
     ];
     const savedRoles = await Role.insertMany(roles);
     console.log('Roles seeded');
+
+    // Statuses
     const statuses = [
       { type: 'status', name: 'Active', slug: 'active', description: 'Active status' },
       { type: 'status', name: 'Inactive', slug: 'inactive', description: 'Inactive status' },
@@ -46,120 +49,24 @@ const seedData = async () => {
       { type: 'leadStatus', name: 'Lost', slug: 'lost', description: 'Lost lead' },
       { type: 'leadSubStatus', name: 'Hot', slug: 'hot', description: 'Customer is most likely to get converted' },
       { type: 'leadSubStatus', name: 'Warm', slug: 'warm', description: 'Customer is likely to get converted' },
-      { type: 'leadSubStatus', name: 'Call in Future', slug: 'cif', description: 'Call In Future - Customer may get interested in future' }
+      { type: 'leadSubStatus', name: 'Call in Future', slug: 'cif', description: 'Call In Future - Customer may get interested in future' },
+      { type: 'leadSubStatus', name: 'Interested', slug: 'interested', description: 'Customer is interested in the product/service' },
+      { type: 'leadSubStatus', name: 'Meeting Arranged', slug: 'meeting-arranged', description: 'Meeting has been scheduled with the customer' }
     ];
     const savedStatuses = await Status.insertMany(statuses);
     console.log('Statuses seeded');
 
+    // Centres
     const centres = [
       { name: 'Main Centre', slug: 'main' },
       { name: 'Delhi Branch', slug: 'delhi' },
       { name: 'Mumbai Branch', slug: 'mumbai' },
-      { name: 'Bangalore Branch', slug: 'bangalore' },
-      { name: 'Chennai Branch', slug: 'chennai' },
-      { name: 'Hyderabad Branch', slug: 'hyderabad' },
-      { name: 'Pune Branch', slug: 'pune' },
-      { name: 'Kolkata Branch', slug: 'kolkata' },
-      { name: 'Ahmedabad Branch', slug: 'ahmedabad' },
-      { name: 'Jaipur Branch', slug: 'jaipur' },
-      { name: 'Lucknow Branch', slug: 'lucknow' },
-      { name: 'Kanpur Branch', slug: 'kanpur' },
-      { name: 'Nagpur Branch', slug: 'nagpur' },
-      { name: 'Indore Branch', slug: 'indore' },
-      { name: 'Patna Branch', slug: 'patna' },
-      { name: 'Bhopal Branch', slug: 'bhopal' },
-      { name: 'Surat Branch', slug: 'surat' },
-      { name: 'Vadodara Branch', slug: 'vadodara' },
-      { name: 'Rajkot Branch', slug: 'rajkot' },
-      { name: 'Amritsar Branch', slug: 'amritsar' },
-      { name: 'Ludhiana Branch', slug: 'ludhiana' },
-      { name: 'Jalandhar Branch', slug: 'jalandhar' },
-      { name: 'Chandigarh Branch', slug: 'chandigarh' },
-      { name: 'Dehradun Branch', slug: 'dehradun' },
-      { name: 'Meerut Branch', slug: 'meerut' },
-      { name: 'Ghaziabad Branch', slug: 'ghaziabad' },
-      { name: 'Noida Branch', slug: 'noida' },
-      { name: 'Gurgaon Branch', slug: 'gurgaon' },
-      { name: 'Faridabad Branch', slug: 'faridabad' },
-      { name: 'Agra Branch', slug: 'agra' },
-      { name: 'Varanasi Branch', slug: 'varanasi' },
-      { name: 'Prayagraj Branch', slug: 'prayagraj' },
-      { name: 'Ranchi Branch', slug: 'ranchi' },
-      { name: 'Jamshedpur Branch', slug: 'jamshedpur' },
-      { name: 'Bhubaneswar Branch', slug: 'bhubaneswar' },
-      { name: 'Cuttack Branch', slug: 'cuttack' },
-      { name: 'Raipur Branch', slug: 'raipur' },
-      { name: 'Bilaspur Branch', slug: 'bilaspur' },
-      { name: 'Durg Branch', slug: 'durg' },
-      { name: 'Gwalior Branch', slug: 'gwalior' },
-      { name: 'Ujjain Branch', slug: 'ujjain' },
-      { name: 'Jodhpur Branch', slug: 'jodhpur' },
-      { name: 'Udaipur Branch', slug: 'udaipur' },
-      { name: 'Ajmer Branch', slug: 'ajmer' },
-      { name: 'Kota Branch', slug: 'kota' },
-      { name: 'Mysore Branch', slug: 'mysore' },
-      { name: 'Mangalore Branch', slug: 'mangalore' },
-      { name: 'Hubli Branch', slug: 'hubli' },
-      { name: 'Belgaum Branch', slug: 'belgaum' },
-      { name: 'Davangere Branch', slug: 'davangere' },
-      { name: 'Coimbatore Branch', slug: 'coimbatore' },
-      { name: 'Madurai Branch', slug: 'madurai' },
-      { name: 'Tiruchirappalli Branch', slug: 'tiruchirappalli' },
-      { name: 'Salem Branch', slug: 'salem' },
-      { name: 'Erode Branch', slug: 'erode' },
-      { name: 'Warangal Branch', slug: 'warangal' },
-      { name: 'Nizamabad Branch', slug: 'nizamabad' },
-      { name: 'Karimnagar Branch', slug: 'karimnagar' },
-      { name: 'Khammam Branch', slug: 'khammam' },
-      { name: 'Tirupati Branch', slug: 'tirupati' },
-      { name: 'Vijayawada Branch', slug: 'vijayawada' },
-      { name: 'Guntur Branch', slug: 'guntur' },
-      { name: 'Nellore Branch', slug: 'nellore' },
-      { name: 'Visakhapatnam Branch', slug: 'visakhapatnam' },
-      { name: 'Rajahmundry Branch', slug: 'rajahmundry' },
-      { name: 'Kakinada Branch', slug: 'kakinada' },
-      { name: 'Shimla Branch', slug: 'shimla' },
-      { name: 'Manali Branch', slug: 'manali' },
-      { name: 'Leh Branch', slug: 'leh' },
-      { name: 'Srinagar Branch', slug: 'srinagar' },
-      { name: 'Jammu Branch', slug: 'jammu' },
-      { name: 'Shillong Branch', slug: 'shillong' },
-      { name: 'Guwahati Branch', slug: 'guwahati' },
-      { name: 'Agartala Branch', slug: 'agartala' },
-      { name: 'Imphal Branch', slug: 'imphal' },
-      { name: 'Aizawl Branch', slug: 'aizawl' },
-      { name: 'Gangtok Branch', slug: 'gangtok' },
-      { name: 'Kohima Branch', slug: 'kohima' },
-      { name: 'Itanagar Branch', slug: 'itanagar' },
-      { name: 'Port Blair Branch', slug: 'portblair' },
-      { name: 'Pondicherry Branch', slug: 'pondicherry' },
-      { name: 'Panaji Branch', slug: 'panaji' },
-      { name: 'Margao Branch', slug: 'margao' },
-      { name: 'Siliguri Branch', slug: 'siliguri' },
-      { name: 'Durgapur Branch', slug: 'durgapur' },
-      { name: 'Asansol Branch', slug: 'asansol' },
-      { name: 'Howrah Branch', slug: 'howrah' },
-      { name: 'Dhanbad Branch', slug: 'dhanbad' },
-      { name: 'Hazaribagh Branch', slug: 'hazaribagh' },
-      { name: 'Aligarh Branch', slug: 'aligarh' },
-      { name: 'Bareilly Branch', slug: 'bareilly' },
-      { name: 'Moradabad Branch', slug: 'moradabad' },
-      { name: 'Saharanpur Branch', slug: 'saharanpur' },
-      { name: 'Roorkee Branch', slug: 'roorkee' },
-      { name: 'Haridwar Branch', slug: 'haridwar' },
-      { name: 'Rishikesh Branch', slug: 'rishikesh' },
-      { name: 'Palakkad Branch', slug: 'palakkad' },
-      { name: 'Thrissur Branch', slug: 'thrissur' },
-      { name: 'Kozhikode Branch', slug: 'kozhikode' },
-      { name: 'Alappuzha Branch', slug: 'alappuzha' },
-      { name: 'Kollam Branch', slug: 'kollam' },
-      { name: 'Thiruvananthapuram Branch', slug: 'thiruvananthapuram' }
+      { name: 'Bangalore Branch', slug: 'bangalore' }
     ];
-
     const savedCentres = await Centre.insertMany(centres);
     console.log('Centres seeded');
 
-    // Seed Languages
+    // Languages
     const languages = [
       { name: 'English', slug: 'english', code: 'en' },
       { name: 'Hindi', slug: 'hindi', code: 'hi' },
@@ -187,20 +94,26 @@ const seedData = async () => {
     ];
     const savedLanguages = await Language.insertMany(languages);
     console.log('Languages seeded');
+
+    // Lead Sources
     const leadSources = [
-      { name: 'Manual', slug: 'manual', description: 'Manually entered leads', isApiSource: false },
-      { name: 'Website', slug: 'website', description: 'Leads from company website or forms', isApiSource: false },
-      { name: 'Referral', slug: 'referral', description: 'Leads from customer referrals', isApiSource: false },
       { name: 'Facebook', slug: 'facebook', description: 'Leads from Facebook ads', isApiSource: true },
       { name: 'Instagram', slug: 'instagram', description: 'Leads from Instagram ads', isApiSource: true },
-      { name: 'Google Ads', slug: 'google-ads', description: 'Leads from Google advertising', isApiSource: true },
-      { name: 'LinkedIn', slug: 'linkedin', description: 'Leads from LinkedIn campaigns', isApiSource: true },
+      { name: 'Instagram Boost', slug: 'instagram-boost', description: 'Leads from Instagram boost posts', isApiSource: false },
+      { name: 'Instagram DM', slug: 'instagram-dm', description: 'Leads from Instagram direct messages', isApiSource: false },
+      { name: 'Google', slug: 'google', description: 'Leads from Google advertising', isApiSource: true },
+      { name: 'Referral', slug: 'referral', description: 'Leads from customer referrals', isApiSource: false },
+      { name: 'CP', slug: 'cp', description: 'Manually entered leads', isApiSource: false },
       { name: 'Walk-in', slug: 'walk-in', description: 'Leads from in-person visits', isApiSource: false },
-      { name: 'Events', slug: 'events', description: 'Leads from events, trade shows, or webinars', isApiSource: false },
-      { name: 'Cold Call', slug: 'cold-call', description: 'Leads from outbound calling', isApiSource: false }
+      { name: 'Organic', slug: 'organic', description: 'Leads from company website or forms', isApiSource: false },
+      { name: 'Just Dial', slug: 'just-dial', description: 'Leads from Just Dial service', isApiSource: false },
+      { name: 'Quikr', slug: 'quikr', description: 'Leads from Quikr campaigns', isApiSource: true },
+      { name: 'Bark', slug: 'bark', description: 'Leads from events, trade shows, or webinars', isApiSource: false }
     ];
     const savedLeadSources = await LeadSource.insertMany(leadSources);
     console.log('Lead sources seeded');
+
+    // Project & House Types
     const projectHouseTypes = [
       { name: 'New Project', type: 'project', description: 'Brand new residential or commercial construction' },
       { name: 'Under Construction', type: 'project', description: 'Ongoing project that is not yet completed' },
@@ -224,14 +137,16 @@ const seedData = async () => {
       { name: 'Penthouse Unit', type: 'house', description: 'Luxury top-floor unit with terrace' },
       { name: 'Duplex Unit', type: 'house', description: 'Two-level house unit' },
       { name: 'Triplex Unit', type: 'house', description: 'Three-level house unit' }
-
     ];
     const savedProjectHouseTypes = await ProjectAndHouseType.insertMany(projectHouseTypes);
     console.log('Project and house types seeded');
+
+    // Admin user
     const adminRole = savedRoles.find(role => role.slug === 'admin');
     const activeStatus = savedStatuses.find(status => status.slug === 'active' && status.type === 'status');
-    const mumbaiCentre = savedCentres.find(centre => centre.slug === 'mumbai');
+    const mainCentre = savedCentres.find(centre => centre.slug === 'main');
     const englishLanguage = savedLanguages.find(lang => lang.code === 'en');
+
     const adminUser = new User({
       name: 'System Administrator',
       email: 'admin@lms.com',
@@ -240,14 +155,14 @@ const seedData = async () => {
       designation: 'System Administrator',
       roleId: adminRole._id,
       statusId: activeStatus._id,
-      centreId: mumbaiCentre._id,
+      centreId: mainCentre._id,
       languageIds: [englishLanguage._id],
       qualification: 'high_value'
     });
     await adminUser.save();
     console.log('Admin user created');
 
-      console.log('All data seeded successfully!');
+    console.log('All data seeded successfully!');
     console.log('Admin login: admin@lms.com / admin123');
     process.exit(0);
   } catch (error) {

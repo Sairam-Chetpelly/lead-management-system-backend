@@ -82,12 +82,7 @@ const leadActivitySchema = new mongoose.Schema({
   },
   leadValue: {
     type: String,
-    enum: ['high value', 'medium value', 'low value'],
-    required: false
-  },
-  paymentMethod: {
-    type: String,
-    enum: ['cod', 'upi', 'debit card', 'credit card', 'emi', 'cheque', 'loan'],
+    enum: ['high value', 'low value'],
     required: false
   },
   siteVisit: {
@@ -114,7 +109,19 @@ const leadActivitySchema = new mongoose.Schema({
     type: Date,
     required: false
   },
+  meetingArrangedDate: {
+    type: Date,
+    required: false
+  },
   cifDate: {
+    type: Date,
+    required: false
+  },
+  leadWonDate: {
+    type: Date,
+    required: false
+  },
+  leadLostDate: {
     type: Date,
     required: false
   },

@@ -9,6 +9,7 @@ const Status = require('../models/Status');
 const Centre = require('../models/Centre');
 const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
+const Lead = require('../models/Lead');
 
 // Configure multer for profile image uploads
 const storage = multer.diskStorage({
@@ -42,8 +43,24 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '', role = '', status = '', centre = '' } = req.query;
     
+    // Get requesting user's role
+    const requestingUser = await User.findById(req.user.userId).populate('roleId');
+    const requestingUserRole = requestingUser?.roleId?.slug;
+    
     // Build filter query
     const filter = { deletedAt: null };
+    
+    // Filter users based on requesting user's role
+    if (requestingUserRole === 'hod_presales' || requestingUserRole === 'manager_presales') {
+      const presalesRoles = await Role.find({ 
+        slug: { $in: ['presales_agent', 'hod_presales', 'manager_presales'] }
+      });
+      const presalesRoleIds = presalesRoles.map(role => role._id);
+      filter.roleId = { $in: presalesRoleIds };
+    } else if (requestingUserRole === 'hod_sales' || requestingUserRole === 'sales_manager') {
+      // HOD sales and sales manager can only see users from their center
+      filter.centreId = requestingUser.centreId;
+    }
     
     if (search) {
       filter.$or = [
@@ -84,7 +101,7 @@ router.get('/', authenticateToken, async (req, res) => {
     ]);
     
     // Get lead counts for sales and presales agents
-    const LeadActivity = require('../models/LeadActivity');
+
     const usersWithLeadCounts = await Promise.all(
       users.map(async (user) => {
         const userObj = user.toObject();
@@ -96,13 +113,6 @@ router.get('/', authenticateToken, async (req, res) => {
             { $match: { deletedAt: null } },
             { $sort: { createdAt: -1 } },
             {
-              $group: {
-                _id: '$leadId',
-                latestActivity: { $first: '$$ROOT' }
-              }
-            },
-            { $replaceRoot: { newRoot: '$latestActivity' } },
-            {
               $match: {
                 $or: [
                   { presalesUserId: user._id },
@@ -113,7 +123,7 @@ router.get('/', authenticateToken, async (req, res) => {
             { $count: 'total' }
           ];
           
-          const result = await LeadActivity.aggregate(pipeline);
+          const result = await Lead.aggregate(pipeline);
           userObj.leadCount = result.length > 0 ? result[0].total : 0;
         } else {
           userObj.leadCount = 0;
@@ -164,10 +174,33 @@ router.post('/', authenticateToken, [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    // Get requesting user's role and center
+    const requestingUser = await User.findById(req.user.userId).populate('roleId');
+    const requestingUserRole = requestingUser?.roleId?.slug;
+    
     const userData = {
       ...req.body,
       createdBy: req.user._id
     };
+    
+    // HOD sales and sales manager can only create users in their center and with sales roles
+    if (requestingUserRole === 'hod_sales' || requestingUserRole === 'sales_manager') {
+      userData.centreId = requestingUser.centreId;
+      
+      // Validate role is sales-related
+      const targetRole = await Role.findById(userData.roleId);
+      if (!targetRole || !['hod_sales', 'sales_manager', 'sales_agent'].includes(targetRole.slug)) {
+        return res.status(403).json({ error: 'Can only create sales-related users' });
+      }
+    }
+    
+    // HOD presales and manager presales can only create presales roles
+    if (requestingUserRole === 'hod_presales' || requestingUserRole === 'manager_presales') {
+      const targetRole = await Role.findById(userData.roleId);
+      if (!targetRole || !['presales_agent', 'hod_presales', 'manager_presales'].includes(targetRole.slug)) {
+        return res.status(403).json({ error: 'Can only create presales-related users' });
+      }
+    }
     
     // Remove empty userType to prevent enum validation error
     if (!userData.userType) {
@@ -196,11 +229,36 @@ router.post('/', authenticateToken, [
 // Update user (Admin only)
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
+    // Get requesting user's role and center
+    const requestingUser = await User.findById(req.user.userId).populate('roleId');
+    const requestingUserRole = requestingUser?.roleId?.slug;
+    
+    // Check if HOD sales or sales manager is trying to update user from different center
+    if (requestingUserRole === 'hod_sales' || requestingUserRole === 'sales_manager') {
+      const targetUser = await User.findById(req.params.id);
+      if (!targetUser || !targetUser.centreId.equals(requestingUser.centreId)) {
+        return res.status(403).json({ error: 'Access denied: Can only update users from your center' });
+      }
+    }
+    
+    // Check if HOD presales or manager presales is trying to update non-presales user
+    if (requestingUserRole === 'hod_presales' || requestingUserRole === 'manager_presales') {
+      const targetUser = await User.findById(req.params.id).populate('roleId');
+      if (!targetUser || !['presales_agent', 'hod_presales', 'manager_presales'].includes(targetUser.roleId.slug)) {
+        return res.status(403).json({ error: 'Access denied: Can only update presales users' });
+      }
+    }
+    
     const updateData = { ...req.body };
     
     // Remove password if empty (don't update)
     if (!updateData.password) {
       delete updateData.password;
+    }
+    
+    // HOD sales and sales manager cannot change center
+    if (requestingUserRole === 'hod_sales' || requestingUserRole === 'sales_manager') {
+      delete updateData.centreId;
     }
     
     const user = await User.findByIdAndUpdate(

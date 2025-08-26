@@ -171,7 +171,57 @@ router.put('/roles/:id', authenticateToken, roleController.update);
 router.delete('/roles/:id', authenticateToken, roleController.delete);
 
 // Centres CRUD with pagination
-router.get('/centres', authenticateToken, centreController.getAll);
+router.get('/centres', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '' } = req.query;
+    
+    const filter = { deletedAt: null };
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const [centres, total] = await Promise.all([
+      Centre.find(filter)
+        .skip(skip)
+        .limit(parseInt(limit))
+        .sort({ createdAt: -1 }),
+      Centre.countDocuments(filter)
+    ]);
+    
+    // Add user and lead counts for each centre
+    const centresWithCounts = await Promise.all(
+      centres.map(async (centre) => {
+        const [userCount, leadCount] = await Promise.all([
+          User.countDocuments({ centreId: centre._id, deletedAt: null }),
+          Lead.countDocuments({ centreId: centre._id, deletedAt: null })
+        ]);
+        
+        return {
+          ...centre.toObject(),
+          userCount,
+          leadCount
+        };
+      })
+    );
+    
+    res.json({
+      data: centresWithCounts,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        total,
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 router.post('/centres', authenticateToken, [
   body('name').notEmpty().withMessage('Name is required'),
   body('slug').notEmpty().withMessage('Slug is required')
@@ -342,7 +392,32 @@ router.delete('/statuses/:id', authenticateToken, async (req, res) => {
 
 // Export Routes (JSON for CSV)
 router.get('/roles/export', authenticateToken, roleController.export);
-router.get('/centres/export', authenticateToken, centreController.export);
+router.get('/centres/export', authenticateToken, async (req, res) => {
+  try {
+    const centres = await Centre.find({ deletedAt: null }).sort({ createdAt: -1 });
+    
+    const csvData = await Promise.all(
+      centres.map(async (centre) => {
+        const [userCount, leadCount] = await Promise.all([
+          User.countDocuments({ centreId: centre._id, deletedAt: null }),
+          Lead.countDocuments({ centreId: centre._id, deletedAt: null })
+        ]);
+        
+        return {
+          'Name': centre.name,
+          'Slug': centre.slug,
+          'User Count': userCount,
+          'Lead Count': leadCount,
+          'Created': centre.createdAt
+        };
+      })
+    );
+    
+    res.json(csvData);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 router.get('/languages/export', authenticateToken, languageController.export);
 router.get('/statuses/export', authenticateToken, statusController.export);
 

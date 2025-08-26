@@ -5,6 +5,7 @@ const LeadActivity = require('../models/LeadActivity');
 const CallLog = require('../models/CallLog');
 const Status = require('../models/Status');
 const User = require('../models/User');
+const Role = require('../models/Role');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -21,57 +22,51 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
     
-
-    
-    // Count unique leads using same logic as leads table
-    const getUniqueLeadCount = async (additionalFilter = {}) => {
-      const pipeline = [
-        { $match: { deletedAt: null, ...additionalFilter } },
-        { $sort: { createdAt: -1 } },
-        { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
-        { $replaceRoot: { newRoot: '$latestActivity' } }
-      ];
+    // Build base filter for leads based on user role
+    const getLeadFilter = async (additionalFilter = {}) => {
+      let filter = { deletedAt: null, ...additionalFilter };
       
-      // Apply role-based filtering after grouping (same as leads table)
-      let postGroupFilter = {};
       if (userRole === 'presales_agent') {
-        postGroupFilter.presalesUserId = new mongoose.Types.ObjectId(req.user.userId);
+        filter.presalesUserId = new mongoose.Types.ObjectId(req.user.userId);
         const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
         if (leadStatus) {
-          postGroupFilter.leadStatusId = leadStatus._id;
+          filter.leadStatusId = leadStatus._id;
         }
       } else if (userRole === 'sales_agent') {
         const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
         const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
-        postGroupFilter.salesUserId = new mongoose.Types.ObjectId(req.user.userId);
-        postGroupFilter.leadStatusId = { 
+        filter.salesUserId = new mongoose.Types.ObjectId(req.user.userId);
+        filter.leadStatusId = { 
           $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean)
         };
       } else if (userRole === 'hod_presales' || userRole === 'manager_presales') {
         const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
         if (leadStatus) {
-          postGroupFilter.leadStatusId = leadStatus._id;
+          filter.leadStatusId = leadStatus._id;
+        }
+      } else if (userRole === 'hod_sales') {
+        // HOD sales can only see leads from their center
+        filter.centreId = user.centreId;
+      } else if (userRole === 'sales_manager') {
+        // Sales manager can only see qualified leads from their center
+        filter.centreId = user.centreId;
+        const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
+        if (qualifiedStatus) {
+          filter.leadStatusId = qualifiedStatus._id;
         }
       }
       
-      if (Object.keys(postGroupFilter).length > 0) {
-        pipeline.push({ $match: postGroupFilter });
-      }
-      
-      pipeline.push({ $count: 'total' });
-      
-      const result = await LeadActivity.aggregate(pipeline);
-      return result.length > 0 ? result[0].total : 0;
+      return filter;
     };
     
-    // Total leads (unique count)
-    const totalLeads = await getUniqueLeadCount();
+    // Total leads
+    const totalLeads = await Lead.countDocuments(await getLeadFilter());
     
-    // This week leads (unique count)
-    const weekLeads = await getUniqueLeadCount({ createdAt: { $gte: startOfWeek } });
+    // This week leads
+    const weekLeads = await Lead.countDocuments(await getLeadFilter({ createdAt: { $gte: startOfWeek } }));
     
-    // Today's leads (unique count)
-    const todayLeads = await getUniqueLeadCount({ createdAt: { $gte: startOfToday } });
+    // Today's leads
+    const todayLeads = await Lead.countDocuments(await getLeadFilter({ createdAt: { $gte: startOfToday } }));
     
     // Today's calls (filter by user for presales and sales agents)
     let callFilter = { deletedAt: null, createdAt: { $gte: startOfToday } };
@@ -80,25 +75,15 @@ router.get('/stats', authenticateToken, async (req, res) => {
     }
     const todayCalls = await CallLog.countDocuments(callFilter);
     
-    // Won leads (unique count) - don't apply role filters for won/lost counts
+    // Won leads - don't apply role filters for won/lost counts
     const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
-    const wonLeads = wonStatus ? await LeadActivity.aggregate([
-      { $match: { deletedAt: null, leadStatusId: wonStatus._id } },
-      { $sort: { createdAt: -1 } },
-      { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
-      { $count: 'total' }
-    ]).then(result => result.length > 0 ? result[0].total : 0) : 0;
+    const wonLeads = wonStatus ? await Lead.countDocuments({ deletedAt: null, leadStatusId: wonStatus._id }) : 0;
     
-    // Lost leads (unique count) - don't apply role filters for won/lost counts
+    // Lost leads - don't apply role filters for won/lost counts
     const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
-    const lostLeads = lostStatus ? await LeadActivity.aggregate([
-      { $match: { deletedAt: null, leadStatusId: lostStatus._id } },
-      { $sort: { createdAt: -1 } },
-      { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
-      { $count: 'total' }
-    ]).then(result => result.length > 0 ? result[0].total : 0) : 0;
+    const lostLeads = lostStatus ? await Lead.countDocuments({ deletedAt: null, leadStatusId: lostStatus._id }) : 0;
     
-    // Weekly lead trend (last 7 days) - unique count
+    // Weekly lead trend (last 7 days)
     const weeklyTrend = [];
     const weeklyCallTrend = [];
     for (let i = 6; i >= 0; i--) {
@@ -108,9 +93,9 @@ router.get('/stats', authenticateToken, async (req, res) => {
       const nextDate = new Date(date);
       nextDate.setDate(nextDate.getDate() + 1);
       
-      const dayLeadCount = await getUniqueLeadCount({
+      const dayLeadCount = await Lead.countDocuments(await getLeadFilter({
         createdAt: { $gte: date, $lt: nextDate }
-      });
+      }));
       
       // Daily call count for presales and sales agents
       let dayCallFilter = { deletedAt: null, createdAt: { $gte: date, $lt: nextDate } };
@@ -130,118 +115,52 @@ router.get('/stats', authenticateToken, async (req, res) => {
       });
     }
     
-    // Get all statuses first
-    const allStatuses = await Status.find({ type: 'leadStatus', deletedAt: null });
-    
-    // Get unique leads with their latest status using same filtering
+    // Status distribution
     const statusPipeline = [
-      { $match: { deletedAt: null } },
-      { $sort: { createdAt: -1 } },
-      { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
-      { $replaceRoot: { newRoot: '$latestActivity' } }
-    ];
-    
-    // Apply same role-based filtering
-    let postGroupFilter = {};
-    if (userRole === 'presales_agent') {
-      postGroupFilter.presalesUserId = new mongoose.Types.ObjectId(req.user.userId);
-      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-      if (leadStatus) {
-        postGroupFilter.leadStatusId = leadStatus._id;
-      }
-    } else if (userRole === 'sales_agent') {
-      const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
-      const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
-      postGroupFilter.salesUserId = new mongoose.Types.ObjectId(req.user.userId);
-      postGroupFilter.leadStatusId = { 
-        $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean)
-      };
-    } else if (userRole === 'hod_presales' || userRole === 'manager_presales') {
-      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-      if (leadStatus) {
-        postGroupFilter.leadStatusId = leadStatus._id;
-      }
-    }
-    
-    if (Object.keys(postGroupFilter).length > 0) {
-      statusPipeline.push({ $match: postGroupFilter });
-    }
-    
-    statusPipeline.push({ $group: { _id: '$leadStatusId', count: { $sum: 1 } } });
-    
-    const leadsWithStatus = await LeadActivity.aggregate(statusPipeline);
-    
-    // Build status distribution
-    const statusDistribution = [];
-    let noStatusCount = 0;
-    
-    for (const item of leadsWithStatus) {
-      if (item._id === null) {
-        noStatusCount = item.count;
-      } else {
-        const status = allStatuses.find(s => s._id.toString() === item._id.toString());
-        if (status) {
-          statusDistribution.push({
-            _id: status.name,
-            count: item.count
-          });
+      { $match: await getLeadFilter() },
+      { $group: { _id: '$leadStatusId', count: { $sum: 1 } } },
+      {
+        $lookup: {
+          from: 'statuses',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'status'
         }
-      }
-    }
-    
-    if (noStatusCount > 0) {
-      statusDistribution.push({ _id: 'No Status', count: noStatusCount });
-    }
-    
-    statusDistribution.sort((a, b) => b.count - a.count);
-    statusDistribution.splice(6);
-    
-    // Lead value distribution for all users
-    const valuePipeline = [
-      { $match: { deletedAt: null } },
-      { $sort: { createdAt: -1 } },
-      { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
-      { $replaceRoot: { newRoot: '$latestActivity' } }
+      },
+      {
+        $addFields: {
+          statusName: {
+            $cond: {
+              if: { $gt: [{ $size: '$status' }, 0] },
+              then: { $arrayElemAt: ['$status.name', 0] },
+              else: 'No Status'
+            }
+          }
+        }
+      },
+      { $project: { _id: '$statusName', count: 1 } },
+      { $sort: { count: -1 } },
+      { $limit: 6 }
     ];
     
-    if (Object.keys(postGroupFilter).length > 0) {
-      valuePipeline.push({ $match: postGroupFilter });
-    }
+    const statusDistribution = await Lead.aggregate(statusPipeline);
     
-    valuePipeline.push({ $group: { _id: '$leadValue', count: { $sum: 1 } } });
+    // Lead value distribution
+    const valuePipeline = [
+      { $match: await getLeadFilter() },
+      { $group: { _id: '$leadValue', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ];
     
-    const valueResults = await LeadActivity.aggregate(valuePipeline);
+    const valueResults = await Lead.aggregate(valuePipeline);
     const leadValueDistribution = valueResults.map(item => ({
       _id: item._id || 'Not Set',
       count: item.count
     }));
     
-    // Source-wise lead distribution based on user role
+    // Source-wise lead distribution
     const sourcePipeline = [
-      { $match: { deletedAt: null } },
-      { $sort: { createdAt: -1 } },
-      { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
-      { $replaceRoot: { newRoot: '$latestActivity' } }
-    ];
-    
-    // Apply role-based filtering
-    let sourcePostGroupFilter = {};
-    if (userRole === 'presales_agent') {
-      sourcePostGroupFilter.presalesUserId = new mongoose.Types.ObjectId(req.user.userId);
-    } else if (userRole === 'sales_agent') {
-      const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
-      const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
-      sourcePostGroupFilter.salesUserId = new mongoose.Types.ObjectId(req.user.userId);
-      sourcePostGroupFilter.leadStatusId = { 
-        $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean)
-      };
-    }
-    
-    if (Object.keys(sourcePostGroupFilter).length > 0) {
-      sourcePipeline.push({ $match: sourcePostGroupFilter });
-    }
-    
-    sourcePipeline.push(
+      { $match: await getLeadFilter() },
       {
         $lookup: {
           from: 'leadsources',
@@ -263,23 +182,13 @@ router.get('/stats', authenticateToken, async (req, res) => {
       },
       { $group: { _id: '$sourceName', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
-    );
+    ];
     
-    const sourceDistribution = await LeadActivity.aggregate(sourcePipeline);
+    const sourceDistribution = await Lead.aggregate(sourcePipeline);
     
     // Center-wise distribution
     const centerPipeline = [
-      { $match: { deletedAt: null } },
-      { $sort: { createdAt: -1 } },
-      { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
-      { $replaceRoot: { newRoot: '$latestActivity' } }
-    ];
-    
-    if (Object.keys(sourcePostGroupFilter).length > 0) {
-      centerPipeline.push({ $match: sourcePostGroupFilter });
-    }
-    
-    centerPipeline.push(
+      { $match: await getLeadFilter() },
       {
         $lookup: {
           from: 'centres',
@@ -301,23 +210,13 @@ router.get('/stats', authenticateToken, async (req, res) => {
       },
       { $group: { _id: '$centreName', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
-    );
+    ];
     
-    const centerDistribution = await LeadActivity.aggregate(centerPipeline);
+    const centerDistribution = await Lead.aggregate(centerPipeline);
     
     // Language-wise distribution
     const languagePipeline = [
-      { $match: { deletedAt: null } },
-      { $sort: { createdAt: -1 } },
-      { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
-      { $replaceRoot: { newRoot: '$latestActivity' } }
-    ];
-    
-    if (Object.keys(sourcePostGroupFilter).length > 0) {
-      languagePipeline.push({ $match: sourcePostGroupFilter });
-    }
-    
-    languagePipeline.push(
+      { $match: await getLeadFilter() },
       {
         $lookup: {
           from: 'languages',
@@ -339,46 +238,94 @@ router.get('/stats', authenticateToken, async (req, res) => {
       },
       { $group: { _id: '$languageName', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
-    );
+    ];
     
-    const languageDistribution = await LeadActivity.aggregate(languagePipeline);
+    const languageDistribution = await Lead.aggregate(languagePipeline);
     
     // Lead sub-status distribution for sales users and admin
     let leadSubStatusDistribution = [];
     if (userRole === 'sales_agent' || userRole === 'admin' || userRole === 'hod_sales' || userRole === 'manager_sales') {
-      const subStatusPipeline = [
-        { $match: { deletedAt: null } },
-        { $sort: { createdAt: -1 } },
-        { $group: { _id: '$leadId', latestActivity: { $first: '$$ROOT' } } },
-        { $replaceRoot: { newRoot: '$latestActivity' } }
-      ];
+      let subStatusFilter = { deletedAt: null };
       
       if (userRole === 'sales_agent') {
         const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
         const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
-        subStatusPipeline.push({ 
-          $match: { 
-            salesUserId: new mongoose.Types.ObjectId(req.user.userId),
-            leadStatusId: { $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean) }
-          } 
-        });
+        subStatusFilter.salesUserId = new mongoose.Types.ObjectId(req.user.userId);
+        subStatusFilter.leadStatusId = { $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean) };
       }
       
-      subStatusPipeline.push({ $group: { _id: '$leadSubStatusId', count: { $sum: 1 } } });
+      const subStatusPipeline = [
+        { $match: subStatusFilter },
+        { $group: { _id: '$leadSubStatusId', count: { $sum: 1 } } },
+        {
+          $lookup: {
+            from: 'statuses',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'subStatus'
+          }
+        },
+        {
+          $addFields: {
+            subStatusName: {
+              $cond: {
+                if: { $gt: [{ $size: '$subStatus' }, 0] },
+                then: { $arrayElemAt: ['$subStatus.name', 0] },
+                else: 'No Sub Status'
+              }
+            }
+          }
+        },
+        { $project: { _id: '$subStatusName', count: 1 } },
+        { $sort: { count: -1 } }
+      ];
       
-      const subStatusResults = await LeadActivity.aggregate(subStatusPipeline);
-      const allSubStatuses = await Status.find({ type: 'leadSubStatus', deletedAt: null });
-      
-      leadSubStatusDistribution = subStatusResults.map(item => {
-        if (item._id === null) {
-          return { _id: 'No Sub Status', count: item.count };
-        }
-        const subStatus = allSubStatuses.find(s => s._id.toString() === item._id.toString());
-        return {
-          _id: subStatus ? subStatus.name : 'Unknown',
-          count: item.count
-        };
+      leadSubStatusDistribution = await Lead.aggregate(subStatusPipeline);
+    }
+    
+    // Get user counts based on role
+    let totalUsers = 0;
+    let activeUsers = 0;
+    
+    if (userRole === 'hod_presales' || userRole === 'manager_presales') {
+      // Only show presales users
+      const presalesRoles = await Role.find({ 
+        slug: { $in: ['presales_agent', 'hod_presales', 'manager_presales'] }
       });
+      const presalesRoleIds = presalesRoles.map(role => role._id);
+      
+      totalUsers = await User.countDocuments({ 
+        deletedAt: null,
+        roleId: { $in: presalesRoleIds }
+      });
+      
+      const activeStatus = await Status.findOne({ slug: 'active', type: 'status' });
+      activeUsers = activeStatus ? await User.countDocuments({ 
+        deletedAt: null,
+        roleId: { $in: presalesRoleIds },
+        statusId: activeStatus._id
+      }) : 0;
+    } else if (userRole === 'hod_sales' || userRole === 'sales_manager') {
+      // Only show users from their center
+      totalUsers = await User.countDocuments({ 
+        deletedAt: null,
+        centreId: user.centreId
+      });
+      
+      const activeStatus = await Status.findOne({ slug: 'active', type: 'status' });
+      activeUsers = activeStatus ? await User.countDocuments({ 
+        deletedAt: null,
+        centreId: user.centreId,
+        statusId: activeStatus._id
+      }) : 0;
+    } else {
+      // Show all users for other roles
+      totalUsers = await User.countDocuments({ deletedAt: null });
+      const activeStatus = await Status.findOne({ slug: 'active', type: 'status' });
+      activeUsers = activeStatus ? await User.countDocuments({ 
+        deletedAt: null,
+        statusId: activeStatus._id
+      }) : 0;
     }
     
     res.json({
@@ -395,7 +342,9 @@ router.get('/stats', authenticateToken, async (req, res) => {
       sourceDistribution,
       centerDistribution,
       languageDistribution,
-      leadSubStatusDistribution
+      leadSubStatusDistribution,
+      totalUsers,
+      activeUsers
     });
     
   } catch (error) {
