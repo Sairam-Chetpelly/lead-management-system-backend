@@ -1511,6 +1511,77 @@ router.get('/download-failed/:filename', (req, res) => {
   }
 });
 
+// Google Ads webhook endpoint
+router.post('/webhook/google-ads', async (req, res) => {
+  try {
+    console.log('Google Ads webhook received:', req.body);
+    // const { name, email, phone, message, campaign_name, ad_group_name, keyword } = req.body;
+
+    // // Validate required fields
+    // if (!phone) {
+    //   return res.status(400).json({ error: 'Phone number is required' });
+    // }
+
+    // // Get or create Google Ads lead source
+    // let leadSource = await LeadSource.findOne({ slug: 'google' });
+    // if (!leadSource) {
+    //   leadSource = new LeadSource({
+    //     name: 'Google Ads',
+    //     slug: 'google',
+    //     description: 'Leads from Google Ads campaigns'
+    //   });
+    //   await leadSource.save();
+    // }
+
+    // // Get lead status
+    // const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+
+    // // Get next presales agent using existing round robin
+    // const presalesAgent = await getNextPresalesAgent();
+
+    // // Prepare lead data
+    // const leadData = {
+    //   name: name || '',
+    //   email: email || '',
+    //   contactNumber: phone,
+    //   sourceId: leadSource._id,
+    //   comment: `Google Ads Lead - Campaign: ${campaign_name || 'N/A'}, Ad Group: ${ad_group_name || 'N/A'}, Keyword: ${keyword || 'N/A'}, Message: ${message || 'N/A'}`
+    // };
+
+    // // Assign to presales agent and set status
+    // if (presalesAgent) {
+    //   leadData.presalesUserId = presalesAgent._id;
+    // }
+    // if (leadStatus) {
+    //   leadData.leadStatusId = leadStatus._id;
+    // }
+
+    // // Create lead
+    // const lead = new Lead(leadData);
+    // await lead.save();
+
+    // // Create initial lead activity snapshot
+    // const leadActivity = new LeadActivity({
+    //   leadId: lead._id,
+    //   ...leadData
+    // });
+    // await leadActivity.save();
+
+    // res.status(201).json({
+    //   success: true,
+    //   message: 'Lead created successfully',
+    //   leadId: lead.leadID
+    // });
+
+  } catch (error) {
+    console.error('Google Ads webhook error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to process lead' 
+    });
+  }
+});
+
 // Serve activity documents
 router.get('/document/:filename', (req, res) => {
   const filename = req.params.filename;

@@ -39,9 +39,9 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
-// API Key protection for all routes except health check and document serving
+// API Key protection for all routes except health check, document serving, and webhooks
 app.use('/api', (req, res, next) => {
-  if (req.path === '/health' || req.path.startsWith('/leads/document/')) {
+  if (req.path === '/health' || req.path.startsWith('/leads/document/') || req.path.startsWith('/leads/webhook/')) {
     return next();
   }
   apiKeyAuth(req, res, next);
