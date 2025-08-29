@@ -1567,11 +1567,10 @@ router.post('/webhook/google-ads', async (req, res) => {
     // });
     // await leadActivity.save();
 
-    // res.status(201).json({
-    //   success: true,
-    //   message: 'Lead created successfully',
-    //   leadId: lead.leadID
-    // });
+    res.status(201).json({
+      success: true,
+      message: 'Lead created successfully'
+    });
 
   } catch (error) {
     console.error('Google Ads webhook error:', error);
