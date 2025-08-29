@@ -201,6 +201,13 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // Validate contact number format (exactly 10 digits)
+    if (!/^\d{10}$/.test(contactNumber)) {
+      return res.status(400).json({
+        error: 'Contact number must be exactly 10 digits'
+      });
+    }
+
     // Get lead source
     const leadSource = await LeadSource.findById(leadSourceId);
     if (!leadSource) {
@@ -244,9 +251,11 @@ router.post('/', async (req, res) => {
       }
       if (qualifiedStatus) {
         leadData.leadStatusId = qualifiedStatus._id;
+        leadData.qualifiedDate = new Date();
       }
       if (hotSubStatus) {
         leadData.leadSubStatusId = hotSubStatus._id;
+        leadData.hotDate = new Date();
       }
     }
 
@@ -310,7 +319,7 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
     let rowNumber = 0;
     const requiredColumns = ['name', 'email', 'contactNumber', 'comment', 'leadSource'];
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const phoneRegex = /^[\d\s\+\-\(\)]{10,15}$/;
+    const phoneRegex = /^\d{10}$/;
 
     // Get all lead sources for matching
     const allLeadSources = await LeadSource.find({ deletedAt: null });
@@ -397,8 +406,8 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
         }
 
         if (!phoneRegex.test(contactNumber)) {
-          failedEntries.push({ ...row, failureReason: 'Invalid contact number format' });
-          errors.push(`Row ${rowNumber}: Invalid contact number format (${contactNumber})`);
+          failedEntries.push({ ...row, failureReason: 'Contact number must be exactly 10 digits' });
+          errors.push(`Row ${rowNumber}: Contact number must be exactly 10 digits (${contactNumber})`);
           continue;
         }
 
@@ -669,16 +678,65 @@ router.get('/', authenticateToken, async (req, res) => {
       filter.leadSubStatusId = req.query.leadSubStatus;
     }
     
-    // Date range filters
+    if (req.query.siteVisit) {
+      filter.siteVisit = req.query.siteVisit === 'true';
+    }
+    
+    if (req.query.centerVisit) {
+      filter.centerVisit = req.query.centerVisit === 'true';
+    }
+    
+    if (req.query.virtualMeeting) {
+      filter.virtualMeeting = req.query.virtualMeeting === 'true';
+    }
+    
+    // Date range filters - status-based or creation-based
     if (req.query.dateFrom || req.query.dateTo) {
-      filter.createdAt = {};
+      let dateField = 'createdAt'; // Default to creation date
+      
+      // If status or substatus is selected, use appropriate date field
+      if (req.query.leadStatus) {
+        const selectedStatus = await Status.findById(req.query.leadStatus);
+        if (selectedStatus?.slug === 'won') dateField = 'leadWonDate';
+        else if (selectedStatus?.slug === 'lost') dateField = 'leadLostDate';
+      }
+      
+      if (req.query.leadSubStatus) {
+        const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
+        if (selectedSubStatus?.slug === 'hot') dateField = 'updatedAt';
+        else if (selectedSubStatus?.slug === 'warm') dateField = 'updatedAt';
+        else if (selectedSubStatus?.slug === 'cif') dateField = 'cifDate';
+        else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
+      }
+      
+      // Override with specific activity date fields if those filters are selected
+      if (req.query.siteVisit === 'true') dateField = 'siteVisitDate';
+      if (req.query.centerVisit === 'true') dateField = 'centerVisitDate';
+      if (req.query.virtualMeeting === 'true') dateField = 'virtualMeetingDate';
+      
+      // Use specific substatus date fields
+      if (req.query.leadSubStatus) {
+        const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
+        if (selectedSubStatus?.slug === 'hot') dateField = 'hotDate';
+        else if (selectedSubStatus?.slug === 'warm') dateField = 'warmDate';
+        else if (selectedSubStatus?.slug === 'interested') dateField = 'interestedDate';
+      }
+      
+      // Use specific date fields based on status
+      if (req.query.leadStatus) {
+        const selectedStatus = await Status.findById(req.query.leadStatus);
+        if (selectedStatus?.slug === 'qualified') dateField = 'qualifiedDate';
+        else if (selectedStatus?.slug === 'lead') dateField = 'createdAt';
+      }
+      console.log('Using date field for filtering:', dateField);
+      filter[dateField] = {};
       if (req.query.dateFrom) {
-        filter.createdAt.$gte = new Date(req.query.dateFrom);
+        filter[dateField].$gte = new Date(req.query.dateFrom);
       }
       if (req.query.dateTo) {
         const toDate = new Date(req.query.dateTo);
         toDate.setHours(23, 59, 59, 999);
-        filter.createdAt.$lte = toDate;
+        filter[dateField].$lte = toDate;
       }
     }
 
@@ -1076,6 +1134,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
       
       if (leadStatus && leadStatus.slug === 'qualified') {
         console.log('Lead status changed to qualified, assigning to sales team');
+        updatedData.qualifiedDate = new Date();
         
         // Auto-assign to sales team using round robin with centre and language
         const salesAgent = await getNextSalesAgent(updatedData.centreId, updatedData.languageId);
@@ -1090,6 +1149,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
         if (hotSubStatus) {
           console.log('Set sub-status to hot');
           updatedData.leadSubStatusId = hotSubStatus._id;
+          updatedData.hotDate = new Date();
         }
       } else if (leadStatus && leadStatus.slug === 'won') {
         console.log('Lead status changed to won');
@@ -1107,6 +1167,16 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
         updatedData.salesUserId = null;
         updatedData.cifDate = null;
         updatedData.meetingArrangedDate = null;
+      }
+    }
+    
+    // Check if substatus changed
+    if (req.body.leadSubStatusId) {
+      const subStatus = await Status.findById(req.body.leadSubStatusId);
+      if (subStatus) {
+        if (subStatus.slug === 'hot') updatedData.hotDate = new Date();
+        else if (subStatus.slug === 'warm') updatedData.warmDate = new Date();
+        else if (subStatus.slug === 'interested') updatedData.interestedDate = new Date();
       }
     }
 
@@ -1224,6 +1294,8 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
     if (req.body.leadStatusId) {
       const leadStatus = await Status.findById(req.body.leadStatusId);
       if (leadStatus && leadStatus.slug === 'qualified') {
+        updatedData.qualifiedDate = new Date();
+        
         // Assign to sales agent using round robin
         const salesAgent = await getNextSalesAgent(updatedData.centreId, updatedData.languageId);
         if (salesAgent) {
@@ -1237,6 +1309,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
           const hotSubStatus = await Status.findOne({ slug: 'hot', type: 'leadSubStatus' });
           if (hotSubStatus) {
             updatedData.leadSubStatusId = hotSubStatus._id;
+            updatedData.hotDate = new Date();
           }
         }
       } else if (leadStatus && leadStatus.slug === 'won') {
@@ -1253,6 +1326,16 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
         updatedData.salesUserId = null;
         updatedData.cifDate = null;
         updatedData.meetingArrangedDate = null;
+      }
+    }
+    
+    // Check if substatus changed
+    if (req.body.leadSubStatusId) {
+      const subStatus = await Status.findById(req.body.leadSubStatusId);
+      if (subStatus) {
+        if (subStatus.slug === 'hot') updatedData.hotDate = new Date();
+        else if (subStatus.slug === 'warm') updatedData.warmDate = new Date();
+        else if (subStatus.slug === 'interested') updatedData.interestedDate = new Date();
       }
     }
 
@@ -1318,6 +1401,28 @@ router.put('/:id', authenticateToken, async (req, res) => {
         lead[key] = req.body[key];
       }
     });
+    
+    // Check if lead status changed and set appropriate dates
+    if (req.body.leadStatusId) {
+      const leadStatus = await Status.findById(req.body.leadStatusId);
+      if (leadStatus && leadStatus.slug === 'qualified') {
+        lead.qualifiedDate = new Date();
+      } else if (leadStatus && leadStatus.slug === 'won') {
+        lead.leadWonDate = new Date();
+      } else if (leadStatus && leadStatus.slug === 'lost') {
+        lead.leadLostDate = new Date();
+      }
+    }
+    
+    // Check if substatus changed and set appropriate dates
+    if (req.body.leadSubStatusId) {
+      const subStatus = await Status.findById(req.body.leadSubStatusId);
+      if (subStatus) {
+        if (subStatus.slug === 'hot') lead.hotDate = new Date();
+        else if (subStatus.slug === 'warm') lead.warmDate = new Date();
+        else if (subStatus.slug === 'interested') lead.interestedDate = new Date();
+      }
+    }
 
     await lead.save();
     

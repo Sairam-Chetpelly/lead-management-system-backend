@@ -125,6 +125,22 @@ const leadActivitySchema = new mongoose.Schema({
     type: Date,
     required: false
   },
+  qualifiedDate: {
+    type: Date,
+    required: false
+  },
+  hotDate: {
+    type: Date,
+    required: false
+  },
+  warmDate: {
+    type: Date,
+    required: false
+  },
+  interestedDate: {
+    type: Date,
+    required: false
+  },
   comment: {
     type: String,
     required: false

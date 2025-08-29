@@ -16,7 +16,13 @@ const leadSchema = new mongoose.Schema({
   },
   contactNumber: {
     type: String,
-    required: true
+    required: true,
+    validate: {
+      validator: function(v) {
+        return /^\d{10}$/.test(v);
+      },
+      message: 'Contact number must be exactly 10 digits'
+    }
   },
   presalesUserId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -125,6 +131,22 @@ const leadSchema = new mongoose.Schema({
     type: Date,
     required: false
   },
+  qualifiedDate: {
+    type: Date,
+    required: false
+  },
+  hotDate: {
+    type: Date,
+    required: false
+  },
+  warmDate: {
+    type: Date,
+    required: false
+  },
+  interestedDate: {
+    type: Date,
+    required: false
+  },
   comment: {
     type: String,
     required: false
@@ -179,6 +201,10 @@ leadSchema.pre('save', async function(next) {
       cifDate: this.cifDate,
       leadWonDate: this.leadWonDate,
       leadLostDate: this.leadLostDate,
+      qualifiedDate: this.qualifiedDate,
+      hotDate: this.hotDate,
+      warmDate: this.warmDate,
+      interestedDate: this.interestedDate,
       comment: this.comment,
       files: this.files
     };
