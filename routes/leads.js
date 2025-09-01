@@ -1805,11 +1805,7 @@ router.post('/webhook/google-ads', async (req, res) => {
     historyData.processed = true;
     await historyData.save();
     
-    res.status(201).json({
-      success: true,
-      message: 'Lead created successfully',
-      leadId: lead.leadID
-    });
+    res.status(200).json({});
     
   } catch (error) {
     console.error('Google Ads webhook error:', error);
@@ -1826,10 +1822,7 @@ router.post('/webhook/google-ads', async (req, res) => {
       }
     }
     
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to process lead' 
-    });
+    res.status(200).json({});
   }
 });
 
