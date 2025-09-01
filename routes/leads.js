@@ -1722,6 +1722,12 @@ router.post('/webhook/google-ads', async (req, res) => {
   try {
     console.log('Google Ads webhook received:', req.body);
     
+    // Validate Google key
+    if (req.body.google_key !== process.env.GOOGLE_ADS_WEBHOOK_KEY) {
+      console.log('Invalid Google key:', req.body.google_key);
+      return res.status(200).json({});
+    }
+    
     // Store webhook data in history
     const historyData = new GoogleAdsHistory(req.body);
     await historyData.save();
