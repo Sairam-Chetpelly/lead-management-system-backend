@@ -31,14 +31,18 @@ router.post('/login', [
       return res.status(401).json({ error: 'Account is not active' });
     }
 
+    const expiresIn = '24h';
     const token = jwt.sign(
       { userId: user._id },
       process.env.JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn }
     );
+
+    const expiryTime = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
 
     res.json({
       token,
+      expiresAt: expiryTime.getTime(),
       user: {
         id: user._id,
         name: user.name,
