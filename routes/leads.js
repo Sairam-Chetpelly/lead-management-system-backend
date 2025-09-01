@@ -947,56 +947,85 @@ router.get('/', authenticateToken, async (req, res) => {
       filter.virtualMeeting = req.query.virtualMeeting === 'true';
     }
     
-    // Date range filters - status-based or creation-based
+    // Date range filters - status-based or creation-based with OR logic for activities
     if (req.query.dateFrom || req.query.dateTo) {
-      let dateField = 'createdAt'; // Default to creation date
-      
-      // If status or substatus is selected, use appropriate date field
-      if (req.query.leadStatus) {
-        const selectedStatus = await Status.findById(req.query.leadStatus);
-        if (selectedStatus?.slug === 'won') dateField = 'leadWonDate';
-        else if (selectedStatus?.slug === 'lost') dateField = 'leadLostDate';
-      }
-      
-      if (req.query.leadSubStatus) {
-        const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
-        if (selectedSubStatus?.slug === 'hot') dateField = 'updatedAt';
-        else if (selectedSubStatus?.slug === 'warm') dateField = 'updatedAt';
-        else if (selectedSubStatus?.slug === 'cif') dateField = 'cifDate';
-        else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
-      }
-      
-      // Override with specific activity date fields if those filters are selected
-      if (req.query.siteVisit === 'true') dateField = 'siteVisitDate';
-      if (req.query.centerVisit === 'true') dateField = 'centerVisitDate';
-      if (req.query.virtualMeeting === 'true') dateField = 'virtualMeetingDate';
-      
-      // Use specific substatus date fields
-      if (req.query.leadSubStatus) {
-        const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
-        if (selectedSubStatus?.slug === 'hot') dateField = 'hotDate';
-        else if (selectedSubStatus?.slug === 'warm') dateField = 'warmDate';
-        else if (selectedSubStatus?.slug === 'interested') dateField = 'interestedDate';
-      }
-      
-      // Use specific date fields based on status
-      if (req.query.leadStatus) {
-        const selectedStatus = await Status.findById(req.query.leadStatus);
-        if (selectedStatus?.slug === 'qualified') dateField = 'qualifiedDate';
-        else if (selectedStatus?.slug === 'lead') dateField = 'createdAt';
-      }
-      console.log('Using date field for filtering:', dateField);
-      filter[dateField] = {};
-      if (req.query.dateFrom) {
-        filter[dateField].$gte = new Date(req.query.dateFrom);
-      }
-      if (req.query.dateTo) {
+      const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom) : null;
+      const dateTo = req.query.dateTo ? (() => {
         const toDate = new Date(req.query.dateTo);
         toDate.setHours(23, 59, 59, 999);
-        filter[dateField].$lte = toDate;
+        return toDate;
+      })() : null;
+      
+      // Check if any activity filters are selected
+      const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true';
+      
+      if (hasActivityFilters) {
+        // Use OR logic for activity date fields
+        const activityDateConditions = [];
+        
+        if (req.query.siteVisit === 'true') {
+          const siteVisitCondition = {};
+          if (dateFrom) siteVisitCondition.$gte = dateFrom;
+          if (dateTo) siteVisitCondition.$lte = dateTo;
+          if (Object.keys(siteVisitCondition).length > 0) {
+            activityDateConditions.push({ siteVisitDate: siteVisitCondition });
+          }
+        }
+        
+        if (req.query.centerVisit === 'true') {
+          const centerVisitCondition = {};
+          if (dateFrom) centerVisitCondition.$gte = dateFrom;
+          if (dateTo) centerVisitCondition.$lte = dateTo;
+          if (Object.keys(centerVisitCondition).length > 0) {
+            activityDateConditions.push({ centerVisitDate: centerVisitCondition });
+          }
+        }
+        
+        if (req.query.virtualMeeting === 'true') {
+          const virtualMeetingCondition = {};
+          if (dateFrom) virtualMeetingCondition.$gte = dateFrom;
+          if (dateTo) virtualMeetingCondition.$lte = dateTo;
+          if (Object.keys(virtualMeetingCondition).length > 0) {
+            activityDateConditions.push({ virtualMeetingDate: virtualMeetingCondition });
+          }
+        }
+        
+        if (activityDateConditions.length > 0) {
+          filter.$or = filter.$or ? [...filter.$or, ...activityDateConditions] : activityDateConditions;
+        }
+      } else {
+        // Use single date field logic for non-activity filters
+        let dateField = 'createdAt'; // Default to creation date
+        
+        // Use specific date fields based on status
+        if (req.query.leadStatus) {
+          const selectedStatus = await Status.findById(req.query.leadStatus);
+          if (selectedStatus?.slug === 'qualified') dateField = 'qualifiedDate';
+          else if (selectedStatus?.slug === 'won') dateField = 'leadWonDate';
+          else if (selectedStatus?.slug === 'lost') dateField = 'leadLostDate';
+          else if (selectedStatus?.slug === 'lead') dateField = 'createdAt';
+        }
+        
+        // Use specific substatus date fields
+        if (req.query.leadSubStatus) {
+          const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
+          if (selectedSubStatus?.slug === 'hot') dateField = 'hotDate';
+          else if (selectedSubStatus?.slug === 'warm') dateField = 'warmDate';
+          else if (selectedSubStatus?.slug === 'interested') dateField = 'interestedDate';
+          else if (selectedSubStatus?.slug === 'cif') dateField = 'cifDate';
+          else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
+        }
+        
+        console.log('Using date field for filtering:', dateField);
+        filter[dateField] = {};
+        if (dateFrom) {
+          filter[dateField].$gte = dateFrom;
+        }
+        if (dateTo) {
+          filter[dateField].$lte = dateTo;
+        }
       }
     }
-
     // Get leads from Lead table
     const [leads, total] = await Promise.all([
       Lead.find(filter)
@@ -1100,39 +1129,80 @@ router.get('/export', authenticateToken, async (req, res) => {
     if (req.query.centerVisit) filter.centerVisit = req.query.centerVisit === 'true';
     if (req.query.virtualMeeting) filter.virtualMeeting = req.query.virtualMeeting === 'true';
     
-    // Date range filters
+    // Date range filters with OR logic for activities
     if (req.query.dateFrom || req.query.dateTo) {
-      let dateField = 'createdAt';
-      
-      if (req.query.leadStatus) {
-        const selectedStatus = await Status.findById(req.query.leadStatus);
-        if (selectedStatus?.slug === 'won') dateField = 'leadWonDate';
-        else if (selectedStatus?.slug === 'lost') dateField = 'leadLostDate';
-        else if (selectedStatus?.slug === 'qualified') dateField = 'qualifiedDate';
-        else if (selectedStatus?.slug === 'lead') dateField = 'createdAt';
-      }
-      
-      if (req.query.leadSubStatus) {
-        const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
-        if (selectedSubStatus?.slug === 'hot') dateField = 'hotDate';
-        else if (selectedSubStatus?.slug === 'warm') dateField = 'warmDate';
-        else if (selectedSubStatus?.slug === 'interested') dateField = 'interestedDate';
-        else if (selectedSubStatus?.slug === 'cif') dateField = 'cifDate';
-        else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
-      }
-      
-      if (req.query.siteVisit === 'true') dateField = 'siteVisitDate';
-      if (req.query.centerVisit === 'true') dateField = 'centerVisitDate';
-      if (req.query.virtualMeeting === 'true') dateField = 'virtualMeetingDate';
-      
-      filter[dateField] = {};
-      if (req.query.dateFrom) {
-        filter[dateField].$gte = new Date(req.query.dateFrom);
-      }
-      if (req.query.dateTo) {
+      const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom) : null;
+      const dateTo = req.query.dateTo ? (() => {
         const toDate = new Date(req.query.dateTo);
         toDate.setHours(23, 59, 59, 999);
-        filter[dateField].$lte = toDate;
+        return toDate;
+      })() : null;
+      
+      // Check if any activity filters are selected
+      const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true';
+      
+      if (hasActivityFilters) {
+        // Use OR logic for activity date fields
+        const activityDateConditions = [];
+        
+        if (req.query.siteVisit === 'true') {
+          const siteVisitCondition = {};
+          if (dateFrom) siteVisitCondition.$gte = dateFrom;
+          if (dateTo) siteVisitCondition.$lte = dateTo;
+          if (Object.keys(siteVisitCondition).length > 0) {
+            activityDateConditions.push({ siteVisitDate: siteVisitCondition });
+          }
+        }
+        
+        if (req.query.centerVisit === 'true') {
+          const centerVisitCondition = {};
+          if (dateFrom) centerVisitCondition.$gte = dateFrom;
+          if (dateTo) centerVisitCondition.$lte = dateTo;
+          if (Object.keys(centerVisitCondition).length > 0) {
+            activityDateConditions.push({ centerVisitDate: centerVisitCondition });
+          }
+        }
+        
+        if (req.query.virtualMeeting === 'true') {
+          const virtualMeetingCondition = {};
+          if (dateFrom) virtualMeetingCondition.$gte = dateFrom;
+          if (dateTo) virtualMeetingCondition.$lte = dateTo;
+          if (Object.keys(virtualMeetingCondition).length > 0) {
+            activityDateConditions.push({ virtualMeetingDate: virtualMeetingCondition });
+          }
+        }
+        
+        if (activityDateConditions.length > 0) {
+          filter.$or = filter.$or ? [...filter.$or, ...activityDateConditions] : activityDateConditions;
+        }
+      } else {
+        // Use single date field logic for non-activity filters
+        let dateField = 'createdAt';
+        
+        if (req.query.leadStatus) {
+          const selectedStatus = await Status.findById(req.query.leadStatus);
+          if (selectedStatus?.slug === 'won') dateField = 'leadWonDate';
+          else if (selectedStatus?.slug === 'lost') dateField = 'leadLostDate';
+          else if (selectedStatus?.slug === 'qualified') dateField = 'qualifiedDate';
+          else if (selectedStatus?.slug === 'lead') dateField = 'createdAt';
+        }
+        
+        if (req.query.leadSubStatus) {
+          const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
+          if (selectedSubStatus?.slug === 'hot') dateField = 'hotDate';
+          else if (selectedSubStatus?.slug === 'warm') dateField = 'warmDate';
+          else if (selectedSubStatus?.slug === 'interested') dateField = 'interestedDate';
+          else if (selectedSubStatus?.slug === 'cif') dateField = 'cifDate';
+          else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
+        }
+        
+        filter[dateField] = {};
+        if (dateFrom) {
+          filter[dateField].$gte = dateFrom;
+        }
+        if (dateTo) {
+          filter[dateField].$lte = dateTo;
+        }
       }
     }
 
@@ -1140,6 +1210,7 @@ router.get('/export', authenticateToken, async (req, res) => {
       .populate([
         { path: 'presalesUserId', select: 'name email' },
         { path: 'salesUserId', select: 'name email' },
+        { path: 'updatedPerson', select: 'name email' },
         { path: 'languageId', select: 'name' },
         { path: 'sourceId', select: 'name' },
         { path: 'projectTypeId', select: 'name type' },
@@ -1153,18 +1224,39 @@ router.get('/export', authenticateToken, async (req, res) => {
     const csvData = leads.map(lead => ({
       'Lead ID': lead.leadID,
       'Name': lead.name || '',
-      'Email': lead.email,
-      'Contact Number': lead.contactNumber,
-      'Source': lead.sourceId.name,
+      'Email': lead.email || '',
+      'Contact Number': lead.contactNumber || '',
+      'Source': lead.sourceId?.name || '',
       'Centre': lead.centreId?.name || '',
-      'Assigned To': lead.presalesUserId?.name || lead.salesUserId?.name || 'Unassigned',
-      'Assignment Type': lead.presalesUserId ? 'Presales' : lead.salesUserId ? 'Sales' : 'None',
+      'Presales Agent': lead.presalesUserId?.name || '',
+      'Sales Agent': lead.salesUserId?.name || '',
+      'Lead Status': lead.leadStatusId?.name || '',
+      'Lead Sub Status': lead.leadSubStatusId?.name || '',
       'Lead Value': lead.leadValue || '',
       'Language': lead.languageId?.name || '',
       'Project Type': lead.projectTypeId?.name || '',
       'House Type': lead.houseTypeId?.name || '',
+      'Project Value': lead.projectValue || '',
+      'Apartment Name': lead.apartmentName || '',
+      'Expected Possession Date': lead.expectedPossessionDate ? new Date(lead.expectedPossessionDate).toLocaleDateString() : '',
+      'Site Visit': lead.siteVisit ? 'Yes' : 'No',
+      'Site Visit Date': lead.siteVisitDate ? new Date(lead.siteVisitDate).toLocaleDateString() : '',
+      'Center Visit': lead.centerVisit ? 'Yes' : 'No',
+      'Center Visit Date': lead.centerVisitDate ? new Date(lead.centerVisitDate).toLocaleDateString() : '',
+      'Virtual Meeting': lead.virtualMeeting ? 'Yes' : 'No',
+      'Virtual Meeting Date': lead.virtualMeetingDate ? new Date(lead.virtualMeetingDate).toLocaleDateString() : '',
+      'CIF Date': lead.cifDate ? new Date(lead.cifDate).toLocaleDateString() : '',
+      'Meeting Arranged Date': lead.meetingArrangedDate ? new Date(lead.meetingArrangedDate).toLocaleDateString() : '',
+      'Qualified Date': lead.qualifiedDate ? new Date(lead.qualifiedDate).toLocaleDateString() : '',
+      'Hot Date': lead.hotDate ? new Date(lead.hotDate).toLocaleDateString() : '',
+      'Warm Date': lead.warmDate ? new Date(lead.warmDate).toLocaleDateString() : '',
+      'Interested Date': lead.interestedDate ? new Date(lead.interestedDate).toLocaleDateString() : '',
+      'Won Date': lead.leadWonDate ? new Date(lead.leadWonDate).toLocaleDateString() : '',
+      'Lost Date': lead.leadLostDate ? new Date(lead.leadLostDate).toLocaleDateString() : '',
       'Comment': lead.comment || '',
-      'Created At': new Date(lead.createdAt).toLocaleString()
+      'Updated By': lead.updatedPerson?.name || '',
+      'Created At': new Date(lead.createdAt).toLocaleString(),
+      'Updated At': new Date(lead.updatedAt).toLocaleString()
     }));
 
     res.json(csvData);
