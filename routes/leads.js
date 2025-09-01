@@ -295,6 +295,262 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Bulk upload sales leads
+router.post('/bulk-upload-sales', csvUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // Validate file type
+    if (!req.file.originalname.toLowerCase().endsWith('.csv') && req.file.mimetype !== 'text/csv') {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Invalid file type. Please upload a CSV file.' });
+    }
+
+    // Check file size (max 5MB)
+    if (req.file.size > 5 * 1024 * 1024) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'File size too large. Maximum size is 5MB.' });
+    }
+
+    const results = [];
+    const errors = [];
+    const failedEntries = [];
+    let rowNumber = 0;
+    const requiredColumns = ['Client name', 'Centre', 'Phone Number', 'Lead Qualified date', 'Lead Generation Date', 'Value', 'Lead Source', 'Sales Person', 'Activity Comments', 'Status', 'Sub Status'];
+    const phoneRegex = /^\d{10}$/;
+
+    // Get reference data
+    const [allCentres, allLeadSources, allStatuses, allUsers] = await Promise.all([
+      Centre.find({ deletedAt: null }),
+      LeadSource.find({ deletedAt: null }),
+      Status.find({ deletedAt: null }),
+      User.find({ deletedAt: null }).populate('roleId')
+    ]);
+
+    const csvData = [];
+    let headerValidated = false;
+    
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(req.file.path)
+        .pipe(csv())
+        .on('headers', (headers) => {
+          const normalizedHeaders = headers.map(h => h.toLowerCase().trim());
+          const missingColumns = requiredColumns.filter(col => 
+            !normalizedHeaders.includes(col.toLowerCase())
+          );
+          
+          if (missingColumns.length > 0) {
+            reject(new Error(`Missing required columns: ${missingColumns.join(', ')}`))
+            return;
+          }
+          headerValidated = true;
+        })
+        .on('data', (data) => {
+          if (headerValidated) {
+            csvData.push(data);
+          }
+        })
+        .on('end', resolve)
+        .on('error', reject);
+    });
+
+    if (csvData.length === 0) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'CSV file is empty' });
+    }
+
+    // Check row limit
+    if (csvData.length > 2000) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Too many rows. Maximum 2000 rows allowed.' });
+    }
+
+    for (const row of csvData) {
+      rowNumber++;
+      try {
+        const name = row['Client name']?.toString().trim() || '';
+        const centreName = row['Centre']?.toString().trim() || '';
+        const contactNumber = row['Phone Number']?.toString().replace(/[^\d]/g, '') || '';
+        const qualifiedDateStr = row['Lead Qualified date']?.toString().trim() || '';
+        const generationDateStr = row['Lead Generation Date']?.toString().trim() || '';
+        const value = parseInt(row['Value']) || 0;
+        const leadSourceName = row['Lead Source']?.toString().trim() || '';
+        const salesPersonName = row['Sales Person']?.toString().trim() || '';
+        const comment = row['Activity Comments']?.toString().trim() || '';
+        const statusName = row['Status']?.toString().trim() || '';
+        const subStatusName = row['Sub Status']?.toString().trim() || '';
+
+        // Validate required fields
+        if (!name) {
+          failedEntries.push({ ...row, failureReason: 'Client name is required' });
+          errors.push(`Row ${rowNumber}: Client name is required`);
+          continue;
+        }
+
+        // Validate phone number
+        if (!phoneRegex.test(contactNumber)) {
+          failedEntries.push({ ...row, failureReason: 'Invalid phone number format' });
+          errors.push(`Row ${rowNumber}: Invalid phone number`);
+          continue;
+        }
+
+        // Find centre
+        const centre = allCentres.find(c => c.name.toLowerCase().includes(centreName.toLowerCase()));
+        if (!centre) {
+          failedEntries.push({ ...row, failureReason: `Centre '${centreName}' not found` });
+          errors.push(`Row ${rowNumber}: Centre not found`);
+          continue;
+        }
+
+        // Find lead source
+        const leadSource = allLeadSources.find(s => s.name.toLowerCase().includes(leadSourceName.toLowerCase()));
+        if (!leadSource) {
+          failedEntries.push({ ...row, failureReason: `Lead source '${leadSourceName}' not found` });
+          errors.push(`Row ${rowNumber}: Lead source not found`);
+          continue;
+        }
+
+        // Find sales person (sales agent from same centre)
+        const salesPerson = allUsers.find(u => 
+          u.roleId?.slug === 'sales_agent' && 
+          u.name.toLowerCase().includes(salesPersonName.toLowerCase()) &&
+          u.centreId?.toString() === centre._id.toString()
+        );
+        if (!salesPerson) {
+          failedEntries.push({ ...row, failureReason: `Sales person '${salesPersonName}' not found in ${centreName}` });
+          errors.push(`Row ${rowNumber}: Sales person not found`);
+          continue;
+        }
+
+        // Find status and substatus
+        const status = allStatuses.find(s => s.type === 'leadStatus' && s.name.toLowerCase() === statusName.toLowerCase());
+        const subStatus = allStatuses.find(s => s.type === 'leadSubStatus' && s.name.toLowerCase() === subStatusName.toLowerCase());
+
+        // Parse dates
+        const parseDate = (dateStr) => {
+          if (!dateStr) return null;
+          const [day, month, year] = dateStr.split('-');
+          return new Date(`${year}-${month}-${day}`);
+        };
+
+        const qualifiedDate = parseDate(qualifiedDateStr);
+        const generationDate = parseDate(generationDateStr);
+
+        // Prepare lead data
+        const leadData = {
+          name,
+          contactNumber,
+          centreId: centre._id,
+          sourceId: leadSource._id,
+          salesUserId: salesPerson._id,
+          leadStatusId: status?._id,
+          leadSubStatusId: subStatus?._id,
+          leadValue: value > 6 ? 'high value' : 'low value',
+          comment,
+          qualifiedDate,
+          createdAt: generationDate
+        };
+
+        // Set substatus date
+        if (subStatus) {
+          if (subStatus.slug === 'hot') leadData.hotDate = qualifiedDate;
+          else if (subStatus.slug === 'warm') leadData.warmDate = qualifiedDate;
+          else if (subStatus.slug === 'cif') leadData.cifDate = qualifiedDate;
+        }
+
+        // Create lead
+        const lead = new Lead(leadData);
+        await lead.save();
+
+        // Create lead activity
+        const leadActivity = new LeadActivity({
+          leadId: lead._id,
+          ...leadData
+        });
+        await leadActivity.save();
+
+        results.push({
+          row: rowNumber,
+          leadId: lead.leadID,
+          name,
+          contactNumber,
+          centre: centreName,
+          salesPerson: salesPersonName
+        });
+
+      } catch (error) {
+        console.error(`Error processing row ${rowNumber}:`, error);
+        failedEntries.push({ ...row, failureReason: error.message });
+        errors.push(`Row ${rowNumber}: ${error.message}`);
+      }
+    }
+
+    // Create failed entries CSV if there are failures
+    let failedFileUrl = null;
+    if (failedEntries.length > 0) {
+      const timestamp = Date.now();
+      const failedFileName = `failed_sales_leads_${timestamp}.csv`;
+      const failedFilePath = path.join(__dirname, '../uploads/csv', failedFileName);
+      
+      // Ensure directory exists
+      const uploadDir = path.join(__dirname, '../uploads/csv');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      
+      // Create CSV content with headers
+      const headers = Object.keys(failedEntries[0]);
+      let csvContent = headers.join(',') + '\n';
+      
+      // Add failed entries data
+      failedEntries.forEach(entry => {
+        const row = headers.map(header => `"${(entry[header] || '').toString().replace(/"/g, '""')}"`);
+        csvContent += row.join(',') + '\n';
+      });
+      
+      // Write CSV file
+      fs.writeFileSync(failedFilePath, csvContent, 'utf8');
+      failedFileUrl = `/api/leads/download-failed/${failedFileName}`;
+    }
+
+    fs.unlinkSync(req.file.path);
+
+    const totalRows = csvData.length;
+    const successfulRows = results.length;
+    const failedRows = errors.length;
+
+    if (successfulRows === 0) {
+      return res.status(400).json({
+        error: 'No leads were created',
+        totalRows,
+        successful: successfulRows,
+        failed: failedRows,
+        errors,
+        failedFileUrl
+      });
+    }
+
+    res.status(201).json({
+      message: `Processed ${totalRows} rows: ${successfulRows} successful, ${failedRows} failed`,
+      totalRows,
+      successful: successfulRows,
+      failed: failedRows,
+      results,
+      errors,
+      failedFileUrl
+    });
+
+  } catch (error) {
+    console.error('Error in sales bulk upload:', error);
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: 'Failed to process bulk upload' });
+  }
+});
+
 // Bulk upload leads
 router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
   try {
@@ -365,10 +621,10 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'CSV file is empty or contains no valid data rows.' });
     }
 
-    // Check if file has too many rows (max 1000)
-    if (csvData.length > 1000) {
+    // Check if file has too many rows (max 2000)
+    if (csvData.length > 2000) {
       fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'Too many rows. Maximum 1000 rows allowed per upload.' });
+      return res.status(400).json({ error: 'Too many rows. Maximum 2000 rows allowed per upload.' });
     }
 
     // Track existing emails to prevent duplicates within the same upload
