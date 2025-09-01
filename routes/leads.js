@@ -15,6 +15,7 @@ const LeadSource = require('../models/LeadSource');
 const ProjectAndHouseType = require('../models/ProjectAndHouseType');
 const CallLog = require('../models/CallLog');
 const ActivityLog = require('../models/ActivityLog');
+const GoogleAdsHistory = require('../models/GoogleAdsHistory');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -777,9 +778,109 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // Export leads
-router.get('/export', async (req, res) => {
+router.get('/export', authenticateToken, async (req, res) => {
   try {
-    const leads = await Lead.find({ deletedAt: null })
+    // Get user role for filtering
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+    
+    // Build filter for Lead table (same as main leads endpoint)
+    const filter = { deletedAt: null };
+    
+    // Role-based filtering
+    if (userRole === 'presales_agent') {
+      filter.presalesUserId = req.user.userId;
+      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+      if (leadStatus) {
+        filter.leadStatusId = leadStatus._id;
+      }
+    } else if (userRole === 'sales_agent') {
+      const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
+      const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
+      
+      filter.salesUserId = req.user.userId;
+      if (wonStatus || lostStatus) {
+        filter.leadStatusId = { 
+          $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean)
+        };
+      }
+    } else if (userRole === 'hod_presales' || userRole === 'manager_presales') {
+      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+      if (leadStatus) {
+        filter.leadStatusId = leadStatus._id;
+      }
+    } else if (userRole === 'hod_sales') {
+      filter.centreId = user.centreId;
+    } else if (userRole === 'sales_manager') {
+      filter.centreId = user.centreId;
+      const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
+      if (qualifiedStatus) {
+        filter.leadStatusId = qualifiedStatus._id;
+      }
+    }
+    
+    // Apply search filters
+    if (req.query.search) {
+      const searchRegex = new RegExp(req.query.search, 'i');
+      filter.$or = [
+        { name: searchRegex },
+        { email: searchRegex },
+        { contactNumber: searchRegex }
+      ];
+    }
+    
+    if (req.query.source) filter.sourceId = req.query.source;
+    if (req.query.leadValue) filter.leadValue = req.query.leadValue;
+    if (req.query.centre) filter.centreId = req.query.centre;
+    if (req.query.assignedTo) {
+      filter.$or = [
+        { presalesUserId: req.query.assignedTo },
+        { salesUserId: req.query.assignedTo }
+      ];
+    }
+    if (req.query.leadStatus) filter.leadStatusId = req.query.leadStatus;
+    if (req.query.leadSubStatus) filter.leadSubStatusId = req.query.leadSubStatus;
+    if (req.query.siteVisit) filter.siteVisit = req.query.siteVisit === 'true';
+    if (req.query.centerVisit) filter.centerVisit = req.query.centerVisit === 'true';
+    if (req.query.virtualMeeting) filter.virtualMeeting = req.query.virtualMeeting === 'true';
+    
+    // Date range filters
+    if (req.query.dateFrom || req.query.dateTo) {
+      let dateField = 'createdAt';
+      
+      if (req.query.leadStatus) {
+        const selectedStatus = await Status.findById(req.query.leadStatus);
+        if (selectedStatus?.slug === 'won') dateField = 'leadWonDate';
+        else if (selectedStatus?.slug === 'lost') dateField = 'leadLostDate';
+        else if (selectedStatus?.slug === 'qualified') dateField = 'qualifiedDate';
+        else if (selectedStatus?.slug === 'lead') dateField = 'createdAt';
+      }
+      
+      if (req.query.leadSubStatus) {
+        const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
+        if (selectedSubStatus?.slug === 'hot') dateField = 'hotDate';
+        else if (selectedSubStatus?.slug === 'warm') dateField = 'warmDate';
+        else if (selectedSubStatus?.slug === 'interested') dateField = 'interestedDate';
+        else if (selectedSubStatus?.slug === 'cif') dateField = 'cifDate';
+        else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
+      }
+      
+      if (req.query.siteVisit === 'true') dateField = 'siteVisitDate';
+      if (req.query.centerVisit === 'true') dateField = 'centerVisitDate';
+      if (req.query.virtualMeeting === 'true') dateField = 'virtualMeetingDate';
+      
+      filter[dateField] = {};
+      if (req.query.dateFrom) {
+        filter[dateField].$gte = new Date(req.query.dateFrom);
+      }
+      if (req.query.dateTo) {
+        const toDate = new Date(req.query.dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        filter[dateField].$lte = toDate;
+      }
+    }
+
+    const leads = await Lead.find(filter)
       .populate([
         { path: 'presalesUserId', select: 'name email' },
         { path: 'salesUserId', select: 'name email' },
@@ -1620,65 +1721,111 @@ router.get('/download-failed/:filename', (req, res) => {
 router.post('/webhook/google-ads', async (req, res) => {
   try {
     console.log('Google Ads webhook received:', req.body);
-    // const { name, email, phone, message, campaign_name, ad_group_name, keyword } = req.body;
-
-    // // Validate required fields
-    // if (!phone) {
-    //   return res.status(400).json({ error: 'Phone number is required' });
-    // }
-
-    // // Get or create Google Ads lead source
-    // let leadSource = await LeadSource.findOne({ slug: 'google' });
-    // if (!leadSource) {
-    //   leadSource = new LeadSource({
-    //     name: 'Google Ads',
-    //     slug: 'google',
-    //     description: 'Leads from Google Ads campaigns'
-    //   });
-    //   await leadSource.save();
-    // }
-
-    // // Get lead status
-    // const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-
-    // // Get next presales agent using existing round robin
-    // const presalesAgent = await getNextPresalesAgent();
-
-    // // Prepare lead data
-    // const leadData = {
-    //   name: name || '',
-    //   email: email || '',
-    //   contactNumber: phone,
-    //   sourceId: leadSource._id,
-    //   comment: `Google Ads Lead - Campaign: ${campaign_name || 'N/A'}, Ad Group: ${ad_group_name || 'N/A'}, Keyword: ${keyword || 'N/A'}, Message: ${message || 'N/A'}`
-    // };
-
-    // // Assign to presales agent and set status
-    // if (presalesAgent) {
-    //   leadData.presalesUserId = presalesAgent._id;
-    // }
-    // if (leadStatus) {
-    //   leadData.leadStatusId = leadStatus._id;
-    // }
-
-    // // Create lead
-    // const lead = new Lead(leadData);
-    // await lead.save();
-
-    // // Create initial lead activity snapshot
-    // const leadActivity = new LeadActivity({
-    //   leadId: lead._id,
-    //   ...leadData
-    // });
-    // await leadActivity.save();
-
+    
+    // Store webhook data in history
+    const historyData = new GoogleAdsHistory(req.body);
+    await historyData.save();
+    
+    // Extract data from user_column_data
+    const userData = req.body.user_column_data || [];
+    let name = '', email = '', phone = '';
+    
+    userData.forEach(item => {
+      if (item.column_id === 'FULL_NAME') {
+        name = item.string_value;
+      } else if (item.column_id === 'EMAIL') {
+        email = item.string_value;
+      } else if (item.column_id === 'PHONE_NUMBER' || item.column_id === 'WORK_PHONE') {
+        if (!phone) phone = item.string_value;
+      }
+    });
+    
+    // Clean phone number (remove +1, spaces, etc.)
+    if (phone) {
+      phone = phone.replace(/[^\d]/g, '');
+      if (phone.startsWith('1') && phone.length === 11) {
+        phone = phone.substring(1);
+      }
+    }
+    
+    // Validate required fields
+    if (!phone || phone.length !== 10) {
+      historyData.error = 'Invalid phone number format';
+      await historyData.save();
+      return res.status(400).json({ error: 'Valid 10-digit phone number is required' });
+    }
+    
+    // Get or create Google Ads lead source
+    let leadSource = await LeadSource.findOne({ slug: 'google' });
+    if (!leadSource) {
+      leadSource = new LeadSource({
+        name: 'Google Ads',
+        slug: 'google',
+        description: 'Leads from Google Ads campaigns'
+      });
+      await leadSource.save();
+    }
+    
+    // Get lead status
+    const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+    
+    // Get next presales agent
+    const presalesAgent = await getNextPresalesAgent();
+    
+    // Prepare lead data
+    const leadData = {
+      name: name || '',
+      email: email || '',
+      contactNumber: phone,
+      sourceId: leadSource._id,
+      comment: `Google Ads Lead - Campaign ID: ${req.body.campaign_id || 'N/A'}, Ad Group ID: ${req.body.adgroup_id || 'N/A'}, Form ID: ${req.body.form_id || 'N/A'}`
+    };
+    
+    // Assign to presales agent and set status
+    if (presalesAgent) {
+      leadData.presalesUserId = presalesAgent._id;
+    }
+    if (leadStatus) {
+      leadData.leadStatusId = leadStatus._id;
+    }
+    
+    // Create lead
+    const lead = new Lead(leadData);
+    await lead.save();
+    
+    // Create initial lead activity snapshot
+    const leadActivity = new LeadActivity({
+      leadId: lead._id,
+      ...leadData
+    });
+    await leadActivity.save();
+    
+    // Update history with created lead ID
+    historyData.leadId = lead._id;
+    historyData.processed = true;
+    await historyData.save();
+    
     res.status(201).json({
       success: true,
-      message: 'Lead created successfully'
+      message: 'Lead created successfully',
+      leadId: lead.leadID
     });
-
+    
   } catch (error) {
     console.error('Google Ads webhook error:', error);
+    
+    // Update history with error if it exists
+    if (req.body.lead_id) {
+      try {
+        await GoogleAdsHistory.findOneAndUpdate(
+          { lead_id: req.body.lead_id },
+          { error: error.message }
+        );
+      } catch (updateError) {
+        console.error('Error updating history:', updateError);
+      }
+    }
+    
     res.status(500).json({ 
       success: false,
       error: 'Failed to process lead' 
