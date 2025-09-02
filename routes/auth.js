@@ -134,7 +134,7 @@ router.post('/forgot-password', [
     });
 
     const resetUrl = `${process.env.FRONTEND_URL}/?token=${resetToken}`;
-    
+    console.log('Reset URL:', resetUrl); // For debugging
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
@@ -190,6 +190,7 @@ router.post('/forgot-password', [
         </html>
       `
     });
+    
 
     res.json({ message: 'Password reset email sent successfully' });
   } catch (error) {
