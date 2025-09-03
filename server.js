@@ -29,15 +29,30 @@ app.use(express.json());
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Rate limiting - 1000 requests per 15 minutes per IP
-const limiter = rateLimit({
+// Rate limiting - user-based for authenticated routes, IP-based for public routes
+const publicLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // limit each IP to 1000 requests per windowMs
+  max: 50000, // Very high limit for shared networks
   message: { error: 'Too many requests, please try again later' },
   standardHeaders: true,
   legacyHeaders: false,
 });
-app.use('/api', limiter);
+
+const userLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10000, // Per user limit
+  keyGenerator: (req) => {
+    // Use user ID if authenticated, otherwise fall back to IP
+    return req.user?.userId || req.ip;
+  },
+  message: { error: 'Too many requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply public limiter to auth routes, user limiter to authenticated routes
+app.use('/api/auth', publicLimiter);
+app.use('/api', userLimiter);
 
 // API Key protection for all routes except health check, document serving, and webhooks
 app.use('/api', (req, res, next) => {
