@@ -1577,7 +1577,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
     }
 
     // Check if lead status changed
-    if (req.body.leadStatusId) {
+    if (req.body.leadStatusId && req.body.leadStatusId !== lead.leadStatusId?.toString()) {
       const leadStatus = await Status.findById(req.body.leadStatusId);
       console.log('Lead status check:', leadStatus?.slug);
       
@@ -1620,7 +1620,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
     }
     
     // Check if substatus changed
-    if (req.body.leadSubStatusId) {
+    if (req.body.leadSubStatusId && req.body.leadSubStatusId !== lead.leadSubStatusId?.toString()) {
       const subStatus = await Status.findById(req.body.leadSubStatusId);
       if (subStatus) {
         if (subStatus.slug === 'hot') updatedData.hotDate = new Date();
@@ -1740,18 +1740,23 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
     }
 
     // Check if lead status changed and handle accordingly
-    if (req.body.leadStatusId) {
+    if (req.body.leadStatusId && req.body.leadStatusId !== lead.leadStatusId?.toString()) {
       const leadStatus = await Status.findById(req.body.leadStatusId);
       if (leadStatus && leadStatus.slug === 'qualified') {
         updatedData.qualifiedDate = new Date();
         
-        // Assign to sales agent using round robin
-        const salesAgent = await getNextSalesAgent(updatedData.centreId, updatedData.languageId);
-        if (salesAgent) {
-          updatedData.salesUserId = salesAgent._id;
-          // Clear presales assignment when moving to sales
-          updatedData.presalesUserId = null;
+        // Use provided salesUserId or auto-assign using round robin
+        if (req.body.salesUserId) {
+          updatedData.salesUserId = req.body.salesUserId;
+        } else {
+          const salesAgent = await getNextSalesAgent(updatedData.centreId, updatedData.languageId);
+          if (salesAgent) {
+            updatedData.salesUserId = salesAgent._id;
+          }
         }
+        
+        // Clear presales assignment when moving to sales
+        updatedData.presalesUserId = null;
         
         // Set default sub-status for qualified leads
         if (!req.body.leadSubStatusId) {
@@ -1779,7 +1784,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
     }
     
     // Check if substatus changed
-    if (req.body.leadSubStatusId) {
+    if (req.body.leadSubStatusId && req.body.leadSubStatusId !== lead.leadSubStatusId?.toString()) {
       const subStatus = await Status.findById(req.body.leadSubStatusId);
       if (subStatus) {
         if (subStatus.slug === 'hot') updatedData.hotDate = new Date();
@@ -1852,7 +1857,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     });
     
     // Check if lead status changed and set appropriate dates
-    if (req.body.leadStatusId) {
+    if (req.body.leadStatusId && req.body.leadStatusId !== lead.leadStatusId?.toString()) {
       const leadStatus = await Status.findById(req.body.leadStatusId);
       if (leadStatus && leadStatus.slug === 'qualified') {
         lead.qualifiedDate = new Date();
@@ -1864,7 +1869,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
     
     // Check if substatus changed and set appropriate dates
-    if (req.body.leadSubStatusId) {
+    if (req.body.leadSubStatusId && req.body.leadSubStatusId !== lead.leadSubStatusId?.toString()) {
       const subStatus = await Status.findById(req.body.leadSubStatusId);
       if (subStatus) {
         if (subStatus.slug === 'hot') lead.hotDate = new Date();
