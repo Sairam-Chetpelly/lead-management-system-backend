@@ -2185,6 +2185,88 @@ router.post('/webhook/google-ads', async (req, res) => {
   }
 });
 
+// Meta Ads webhook endpoint
+router.post('/webhook/meta-ads', async (req, res) => {
+  try {
+    console.log('Meta Ads webhook received:', req.body);
+    
+    // Validate Meta key
+    // if (req.body.meta_key !== process.env.META_ADS_WEBHOOK_KEY) {
+    //   console.log('Invalid Meta key:', req.body.meta_key);
+    //   return res.status(200).json({});
+    // }
+    
+    // // Extract data from request body
+    // const name = req.body.full_name || req.body.name || '';
+    // const email = req.body.email || '';
+    // let phone = req.body.phone_number || req.body.phone || '';
+    
+    // // Clean phone number (remove +1, spaces, etc.)
+    // if (phone) {
+    //   phone = phone.replace(/[^\d]/g, '');
+    //   if (phone.startsWith('1') && phone.length === 11) {
+    //     phone = phone.substring(1);
+    //   }
+    // }
+    
+    // // Validate required fields
+    // if (!phone || phone.length !== 10) {
+    //   return res.status(400).json({ error: 'Valid 10-digit phone number is required' });
+    // }
+    
+    // // Get or create Meta Ads lead source
+    // let leadSource = await LeadSource.findOne({ slug: 'meta' });
+    // if (!leadSource) {
+    //   leadSource = new LeadSource({
+    //     name: 'Meta Ads',
+    //     slug: 'meta',
+    //     description: 'Leads from Meta Ads campaigns'
+    //   });
+    //   await leadSource.save();
+    // }
+    
+    // // Get lead status
+    // const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+    
+    // // Get next presales agent
+    // const presalesAgent = await getNextPresalesAgent();
+    
+    // // Prepare lead data
+    // const leadData = {
+    //   name: name || '',
+    //   email: email || '',
+    //   contactNumber: phone,
+    //   sourceId: leadSource._id,
+    //   comment: `Meta Ads Lead - Campaign ID: ${req.body.campaign_id || 'N/A'}, Ad Set ID: ${req.body.adset_id || 'N/A'}, Ad ID: ${req.body.ad_id || 'N/A'}`
+    // };
+    
+    // // Assign to presales agent and set status
+    // if (presalesAgent) {
+    //   leadData.presalesUserId = presalesAgent._id;
+    // }
+    // if (leadStatus) {
+    //   leadData.leadStatusId = leadStatus._id;
+    // }
+    
+    // // Create lead
+    // const lead = new Lead(leadData);
+    // await lead.save();
+    
+    // // Create initial lead activity snapshot
+    // const leadActivity = new LeadActivity({
+    //   leadId: lead._id,
+    //   ...leadData
+    // });
+    // await leadActivity.save();
+    
+    res.status(200).json({});
+    
+  } catch (error) {
+    console.error('Meta Ads webhook error:', error);
+    res.status(200).json({});
+  }
+});
+
 // Serve activity documents
 router.get('/document/:filename', (req, res) => {
   const filename = req.params.filename;
