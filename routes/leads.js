@@ -2185,79 +2185,89 @@ router.post('/webhook/google-ads', async (req, res) => {
   }
 });
 
-// Meta Ads webhook endpoint
+// Meta Ads webhook verification (GET)
+router.get('/webhook/meta-ads', (req, res) => {
+  const verifyToken = process.env.META_ADS_WEBHOOK_KEY || 'reminiscent';
+  
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  
+  if (mode === 'subscribe' && token === verifyToken) {
+    console.log('Meta webhook verified successfully');
+    res.status(200).send(challenge);
+  } else {
+    console.log('Meta webhook verification failed');
+    res.sendStatus(403);
+  }
+});
+
+// Meta Ads webhook endpoint (POST)
 router.post('/webhook/meta-ads', async (req, res) => {
   try {
     console.log('Meta Ads webhook received:', req.body);
     
-    // Validate Meta key
-    // if (req.body.meta_key !== process.env.META_ADS_WEBHOOK_KEY) {
-    //   console.log('Invalid Meta key:', req.body.meta_key);
-    //   return res.status(200).json({});
-    // }
+    // Process Meta lead data
+    const entries = req.body.entry || [];
     
-    // // Extract data from request body
-    // const name = req.body.full_name || req.body.name || '';
-    // const email = req.body.email || '';
-    // let phone = req.body.phone_number || req.body.phone || '';
-    
-    // // Clean phone number (remove +1, spaces, etc.)
-    // if (phone) {
-    //   phone = phone.replace(/[^\d]/g, '');
-    //   if (phone.startsWith('1') && phone.length === 11) {
-    //     phone = phone.substring(1);
-    //   }
-    // }
-    
-    // // Validate required fields
-    // if (!phone || phone.length !== 10) {
-    //   return res.status(400).json({ error: 'Valid 10-digit phone number is required' });
-    // }
-    
-    // // Get or create Meta Ads lead source
-    // let leadSource = await LeadSource.findOne({ slug: 'meta' });
-    // if (!leadSource) {
-    //   leadSource = new LeadSource({
-    //     name: 'Meta Ads',
-    //     slug: 'meta',
-    //     description: 'Leads from Meta Ads campaigns'
-    //   });
-    //   await leadSource.save();
-    // }
-    
-    // // Get lead status
-    // const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-    
-    // // Get next presales agent
-    // const presalesAgent = await getNextPresalesAgent();
-    
-    // // Prepare lead data
-    // const leadData = {
-    //   name: name || '',
-    //   email: email || '',
-    //   contactNumber: phone,
-    //   sourceId: leadSource._id,
-    //   comment: `Meta Ads Lead - Campaign ID: ${req.body.campaign_id || 'N/A'}, Ad Set ID: ${req.body.adset_id || 'N/A'}, Ad ID: ${req.body.ad_id || 'N/A'}`
-    // };
-    
-    // // Assign to presales agent and set status
-    // if (presalesAgent) {
-    //   leadData.presalesUserId = presalesAgent._id;
-    // }
-    // if (leadStatus) {
-    //   leadData.leadStatusId = leadStatus._id;
-    // }
-    
-    // // Create lead
-    // const lead = new Lead(leadData);
-    // await lead.save();
-    
-    // // Create initial lead activity snapshot
-    // const leadActivity = new LeadActivity({
-    //   leadId: lead._id,
-    //   ...leadData
-    // });
-    // await leadActivity.save();
+    for (const entry of entries) {
+      const changes = entry.changes || [];
+      
+      for (const change of changes) {
+        if (change.field === 'leadgen') {
+          const leadgenId = change.value.leadgen_id;
+          const adId = change.value.ad_id;
+          const formId = change.value.form_id;
+          
+          // Get or create Meta Ads lead source
+          let leadSource = await LeadSource.findOne({ slug: 'meta' });
+          if (!leadSource) {
+            leadSource = new LeadSource({
+              name: 'Meta Ads',
+              slug: 'meta',
+              description: 'Leads from Meta Ads campaigns'
+            });
+            await leadSource.save();
+          }
+          
+          // Get lead status
+          const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+          
+          // Get next presales agent
+          const presalesAgent = await getNextPresalesAgent();
+          
+          // Prepare lead data (placeholder - you'll need to fetch actual data from Graph API)
+          const leadData = {
+            name: 'Meta Lead',
+            email: '',
+            contactNumber: '0000000000', // Placeholder - replace with actual data
+            sourceId: leadSource._id,
+            comment: `Meta Ads Lead - Leadgen ID: ${leadgenId}, Ad ID: ${adId}, Form ID: ${formId}`
+          };
+          
+          // Assign to presales agent and set status
+          if (presalesAgent) {
+            leadData.presalesUserId = presalesAgent._id;
+          }
+          if (leadStatus) {
+            leadData.leadStatusId = leadStatus._id;
+          }
+          
+          // Create lead
+          const lead = new Lead(leadData);
+          await lead.save();
+          
+          // Create initial lead activity snapshot
+          const leadActivity = new LeadActivity({
+            leadId: lead._id,
+            ...leadData
+          });
+          await leadActivity.save();
+          
+          console.log('Meta lead created:', lead.leadID);
+        }
+      }
+    }
     
     res.status(200).json({});
     
