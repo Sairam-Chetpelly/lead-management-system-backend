@@ -632,11 +632,11 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
     const existingEmails = new Set();
 
     // Get existing emails from database
-    const existingLeads = await LeadActivity.find(
-      { deletedAt: null },
-      { email: 1 }
-    );
-    existingLeads.forEach(lead => existingEmails.add(lead.email.toLowerCase()));
+    // const existingLeads = await LeadActivity.find(
+    //   { deletedAt: null },
+    //   { email: 1 }
+    // );
+    // existingLeads.forEach(lead => existingEmails.add(lead.email.toLowerCase()));
 
     // Process each row
     for (const row of csvData) {
