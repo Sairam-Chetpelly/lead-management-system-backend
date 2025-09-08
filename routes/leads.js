@@ -2205,19 +2205,61 @@ router.get('/webhook/meta-ads', (req, res) => {
 // Meta Ads webhook endpoint (POST)
 router.post('/webhook/meta-ads', async (req, res) => {
   try {
-    console.log('Meta Ads webhook received:', {
-      headers: req.headers,
-      query: req.query,
-      params: req.params,
-      body: req.body,
-      method: req.method,
-      url: req.url,
-      ip: req.ip
+    console.log('Meta Ads webhook received:', req.body);
+    
+    // Validate secret key
+    if (req.body.secret !== process.env.META_ADS_WEBHOOK_KEY) {
+      console.log('Invalid Meta secret:', req.body.secret);
+      return res.status(200).json({});
+    }
+    
+    const { full_name, email, created_time, ad_id, adset_id, campaign_id } = req.body;
+    
+    // Get or create Meta lead source
+    let leadSource = await LeadSource.findOne({ slug: 'facebook' });
+    if (!leadSource) {
+      leadSource = new LeadSource({
+        name: 'Facebook',
+        slug: 'facebook',
+        description: 'Leads from Meta Ads campaigns'
+      });
+      await leadSource.save();
+    }
+    
+    // Get lead status
+    const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+    
+    // Get next presales agent
+    const presalesAgent = await getNextPresalesAgent();
+    
+    // Prepare lead data
+    const leadData = {
+      name: full_name || '',
+      email: email || '',
+      sourceId: leadSource._id,
+      comment: `Meta Ads Lead - Campaign: ${campaign_id || 'N/A'}, AdSet: ${adset_id || 'N/A'}, Ad: ${ad_id || 'N/A'}, Created: ${created_time || 'N/A'}`
+    };
+    
+    // Assign to presales agent and set status
+    if (presalesAgent) {
+      leadData.presalesUserId = presalesAgent._id;
+    }
+    if (leadStatus) {
+      leadData.leadStatusId = leadStatus._id;
+    }
+    
+    // Create lead
+    const lead = new Lead(leadData);
+    await lead.save();
+    
+    // Create initial lead activity snapshot
+    const leadActivity = new LeadActivity({
+      leadId: lead._id,
+      ...leadData
     });
+    await leadActivity.save();
     
-    // Process Meta lead data
-    const entries = req.body.entry || [];
-    
+    console.log('Meta lead created:', lead._id);
     res.status(200).json({});
     
   } catch (error) {
