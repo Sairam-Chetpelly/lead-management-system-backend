@@ -2236,6 +2236,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
     const leadData = {
       name: full_name || '',
       email: email || '',
+      contactNumber: '0000000000', // Placeholder since Meta doesn't provide phone
       sourceId: leadSource._id,
       comment: `Meta Ads Lead - Campaign: ${campaign_id || 'N/A'}, AdSet: ${adset_id || 'N/A'}, Ad: ${ad_id || 'N/A'}, Created: ${created_time || 'N/A'}`
     };
