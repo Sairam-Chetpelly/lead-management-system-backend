@@ -2205,7 +2205,15 @@ router.get('/webhook/meta-ads', (req, res) => {
 // Meta Ads webhook endpoint (POST)
 router.post('/webhook/meta-ads', async (req, res) => {
   try {
-    console.log('Meta Ads webhook received:', req.body);
+    console.log('Meta Ads webhook received:', {
+      headers: req.headers,
+      query: req.query,
+      params: req.params,
+      body: req.body,
+      method: req.method,
+      url: req.url,
+      ip: req.ip
+    });
     
     // Process Meta lead data
     const entries = req.body.entry || [];
