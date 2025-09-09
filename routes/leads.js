@@ -2227,6 +2227,7 @@ router.get('/webhook/meta-ads', (req, res) => {
 // Meta Ads webhook endpoint (POST)
 router.post('/webhook/meta-ads', async (req, res) => {
   try {
+    console.log('Meta Ads webhook received:', JSON.stringify(req.body));
     if (req.body.entry) {
       for (let entry of req.body.entry) {
         if (entry.changes) {
