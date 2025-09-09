@@ -578,8 +578,11 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const phoneRegex = /^\d{10}$/;
 
-    // Get all lead sources for matching
-    const allLeadSources = await LeadSource.find({ deletedAt: null });
+    // Get all lead sources and presales users for matching
+    const [allLeadSources, allPresalesUsers] = await Promise.all([
+      LeadSource.find({ deletedAt: null }),
+      User.find({ deletedAt: null }).populate('roleId')
+    ]);
     if (allLeadSources.length === 0) {
       fs.unlinkSync(req.file.path);
       return res.status(400).json({ error: 'No lead sources found. Please create lead sources first.' });
@@ -648,6 +651,7 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
         const contactNumber = row.contactNumber ? row.contactNumber.toString().trim() : '';
         const comment = row.comment ? row.comment.toString().trim() : '';
         const leadSourceText = row.leadSource ? row.leadSource.toString().trim() : '';
+        const presalesUserText = row.presalesUser ? row.presalesUser.toString().trim() : '';
 
         // Validate required fields and collect failed entries
         if (!contactNumber) {
@@ -710,9 +714,26 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
           continue;
         }
 
-        // Get next presales agent - check if matched source is CP
-        const isCpSource = matchedLeadSource.slug === 'cp' || matchedLeadSource.name.toLowerCase().includes('cp');
-        const presalesAgent = await getNextPresalesAgent(isCpSource);
+        // Handle presales user assignment
+        let presalesAgent = null;
+        if (presalesUserText) {
+          // Find specific presales user by name
+          presalesAgent = allPresalesUsers.find(u => 
+            u.roleId?.slug === 'presales_agent' && 
+            u.name.toLowerCase().includes(presalesUserText.toLowerCase())
+          );
+          
+          if (!presalesAgent) {
+            failedEntries.push({ ...row, failureReason: `Presales user '${presalesUserText}' not found` });
+            errors.push(`Row ${rowNumber}: Presales user '${presalesUserText}' not found`);
+            continue;
+          }
+        } else {
+          // Use round robin if no specific user provided
+          const isCpSource = matchedLeadSource.slug === 'cp' || matchedLeadSource.name.toLowerCase().includes('cp');
+          presalesAgent = await getNextPresalesAgent(isCpSource);
+        }
+        
         const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
 
         // Prepare lead data
@@ -781,7 +802,7 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
       }
       
       // Create CSV content with headers
-      const headers = ['name', 'email', 'contactNumber', 'comment', 'leadSource', 'failureReason'];
+      const headers = ['name', 'email', 'contactNumber', 'comment', 'leadSource', 'presalesUser', 'failureReason'];
       let csvContent = headers.join(',') + '\n';
       
       // Add failed entries data
@@ -792,6 +813,7 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
           `"${(entry.contactNumber || '').toString().replace(/"/g, '""')}"`,
           `"${(entry.comment || '').toString().replace(/"/g, '""')}"`,
           `"${(entry.leadSource || '').toString().replace(/"/g, '""')}"`,
+          `"${(entry.presalesUser || '').toString().replace(/"/g, '""')}"`,
           `"${(entry.failureReason || '').toString().replace(/"/g, '""')}"`
         ];
         csvContent += row.join(',') + '\n';

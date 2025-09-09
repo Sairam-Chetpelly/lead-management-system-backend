@@ -67,10 +67,12 @@ const userSchema = new mongoose.Schema({
     required: false,
     validate: {
       validator: async function(value) {
+        // Allow undefined or null values
+        if (!value) return true;
         if (!this.roleId) return true;
         const role = await mongoose.model('Role').findById(this.roleId);
         if (role && role.slug === 'presales_agent') {
-          return value && ['regular', 'cp_presales'].includes(value);
+          return ['regular', 'cp_presales'].includes(value);
         }
         return true; // Not required for other roles
       },
@@ -102,6 +104,12 @@ userSchema.pre('save', async function(next) {
     const count = await mongoose.model('User').countDocuments();
     this.userId = `USR${String(count + 1).padStart(6, '0')}`;
   }
+  
+  // Clean up empty string userType
+  if (this.userType === '') {
+    this.userType = undefined;
+  }
+  
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();

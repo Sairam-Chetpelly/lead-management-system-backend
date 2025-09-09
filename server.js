@@ -42,9 +42,9 @@ const publicLimiter = rateLimit({
 const userLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10000, // Per user limit
-  keyGenerator: (req) => {
-    // Use user ID if authenticated, otherwise fall back to IP
-    return req.user?.userId || req.ip;
+  keyGenerator: (req, res) => {
+    // Use user ID if authenticated, otherwise fall back to IP with IPv6 support
+    return req.user?.userId || rateLimit.ipKeyGenerator(req, res);
   },
   message: { error: 'Too many requests, please try again later' },
   standardHeaders: true,
