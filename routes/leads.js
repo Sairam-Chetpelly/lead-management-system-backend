@@ -2260,6 +2260,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 const fieldData = leadInfo.field_data || [];
                 let name = '', email = '', phone_number = '';
                 const platform = leadInfo.platform || 'UNKNOWN';
+                console.log("Platform:", platform);
 
                 // Extract form data
                 fieldData.forEach(field => {
