@@ -57,25 +57,25 @@ async function getNextPresalesAgent(assignToCpPresales = false) {
   if (!activeStatus) return null;
 
   let presalesAgents;
-  
+
   if (assignToCpPresales) {
     // Get CP presales agents only
-    presalesAgents = await User.find({ 
+    presalesAgents = await User.find({
       roleId: presalesRole._id,
       statusId: activeStatus._id,
       userType: 'cp_presales',
-      deletedAt: null 
+      deletedAt: null
     });
-    
+
     if (presalesAgents.length === 0) return null;
-    
+
     const agent = presalesAgents[cpPresalesRoundRobin % presalesAgents.length];
     cpPresalesRoundRobin++;
-    
+
     return agent;
   } else {
     // Get regular presales agents only
-    presalesAgents = await User.find({ 
+    presalesAgents = await User.find({
       roleId: presalesRole._id,
       statusId: activeStatus._id,
       $or: [
@@ -83,14 +83,14 @@ async function getNextPresalesAgent(assignToCpPresales = false) {
         { userType: { $exists: false } },
         { userType: null }
       ],
-      deletedAt: null 
+      deletedAt: null
     });
-    
+
     if (presalesAgents.length === 0) return null;
-    
+
     const agent = presalesAgents[presalesRoundRobin % presalesAgents.length];
     presalesRoundRobin++;
-    
+
     return agent;
   }
 }
@@ -142,7 +142,7 @@ router.get('/unsigned', authenticateToken, async (req, res) => {
       presalesUserId: null,
       salesUserId: null
     });
-    
+
     res.json({ count });
   } catch (error) {
     console.error('Error fetching unsigned leads:', error);
@@ -223,7 +223,7 @@ router.post('/', async (req, res) => {
       sourceId: leadSource._id,
       comment
     };
-    
+
     // Only add optional fields if they have values
     if (languageId) leadData.languageId = languageId;
     if (centreId) leadData.centreId = centreId;
@@ -331,16 +331,16 @@ router.post('/bulk-upload-sales', csvUpload.single('file'), async (req, res) => 
 
     const csvData = [];
     let headerValidated = false;
-    
+
     await new Promise((resolve, reject) => {
       fs.createReadStream(req.file.path)
         .pipe(csv())
         .on('headers', (headers) => {
           const normalizedHeaders = headers.map(h => h.toLowerCase().trim());
-          const missingColumns = requiredColumns.filter(col => 
+          const missingColumns = requiredColumns.filter(col =>
             !normalizedHeaders.includes(col.toLowerCase())
           );
-          
+
           if (missingColumns.length > 0) {
             reject(new Error(`Missing required columns: ${missingColumns.join(', ')}`))
             return;
@@ -413,8 +413,8 @@ router.post('/bulk-upload-sales', csvUpload.single('file'), async (req, res) => 
         }
 
         // Find sales person (sales agent from same centre)
-        const salesPerson = allUsers.find(u => 
-          u.roleId?.slug === 'sales_agent' && 
+        const salesPerson = allUsers.find(u =>
+          u.roleId?.slug === 'sales_agent' &&
           u.name.toLowerCase().includes(salesPersonName.toLowerCase()) &&
           u.centreId?.toString() === centre._id.toString()
         );
@@ -493,23 +493,23 @@ router.post('/bulk-upload-sales', csvUpload.single('file'), async (req, res) => 
       const timestamp = Date.now();
       const failedFileName = `failed_sales_leads_${timestamp}.csv`;
       const failedFilePath = path.join(__dirname, '../uploads/csv', failedFileName);
-      
+
       // Ensure directory exists
       const uploadDir = path.join(__dirname, '../uploads/csv');
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });
       }
-      
+
       // Create CSV content with headers
       const headers = Object.keys(failedEntries[0]);
       let csvContent = headers.join(',') + '\n';
-      
+
       // Add failed entries data
       failedEntries.forEach(entry => {
         const row = headers.map(header => `"${(entry[header] || '').toString().replace(/"/g, '""')}"`);
         csvContent += row.join(',') + '\n';
       });
-      
+
       // Write CSV file
       fs.writeFileSync(failedFilePath, csvContent, 'utf8');
       failedFileUrl = `/api/leads/download-failed/${failedFileName}`;
@@ -592,17 +592,17 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
     // Parse CSV file
     const csvData = [];
     let headerValidated = false;
-    
+
     await new Promise((resolve, reject) => {
       fs.createReadStream(req.file.path)
         .pipe(csv())
         .on('headers', (headers) => {
           // Validate CSV headers
           const normalizedHeaders = headers.map(h => h.toLowerCase().trim());
-          const missingColumns = requiredColumns.filter(col => 
+          const missingColumns = requiredColumns.filter(col =>
             !normalizedHeaders.includes(col.toLowerCase())
           );
-          
+
           if (missingColumns.length > 0) {
             reject(new Error(`Missing required columns: ${missingColumns.join(', ')}. Expected columns: ${requiredColumns.join(', ')}`))
             return;
@@ -690,23 +690,23 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
         // Find matching lead source
         let matchedLeadSource = null;
         const leadSourceLower = leadSourceText.toLowerCase();
-        
+
         // First try exact match
-        matchedLeadSource = allLeadSources.find(source => 
+        matchedLeadSource = allLeadSources.find(source =>
           source.name.toLowerCase() === leadSourceLower ||
           source.slug.toLowerCase() === leadSourceLower
         );
-        
+
         // If no exact match, try partial match
         if (!matchedLeadSource) {
-          matchedLeadSource = allLeadSources.find(source => 
+          matchedLeadSource = allLeadSources.find(source =>
             source.name.toLowerCase().includes(leadSourceLower) ||
             leadSourceLower.includes(source.name.toLowerCase()) ||
             source.slug.toLowerCase().includes(leadSourceLower) ||
             leadSourceLower.includes(source.slug.toLowerCase())
           );
         }
-        
+
         // Fail if no match found
         if (!matchedLeadSource) {
           failedEntries.push({ ...row, failureReason: `Lead source '${leadSourceText}' not found. Available sources: ${allLeadSources.map(s => s.name).join(', ')}` });
@@ -718,11 +718,11 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
         let presalesAgent = null;
         if (presalesUserText) {
           // Find specific presales user by name
-          presalesAgent = allPresalesUsers.find(u => 
-            u.roleId?.slug === 'presales_agent' && 
+          presalesAgent = allPresalesUsers.find(u =>
+            u.roleId?.slug === 'presales_agent' &&
             u.name.toLowerCase().includes(presalesUserText.toLowerCase())
           );
-          
+
           if (!presalesAgent) {
             failedEntries.push({ ...row, failureReason: `Presales user '${presalesUserText}' not found` });
             errors.push(`Row ${rowNumber}: Presales user '${presalesUserText}' not found`);
@@ -733,7 +733,7 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
           const isCpSource = matchedLeadSource.slug === 'cp' || matchedLeadSource.name.toLowerCase().includes('cp');
           presalesAgent = await getNextPresalesAgent(isCpSource);
         }
-        
+
         const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
 
         // Prepare lead data
@@ -794,17 +794,17 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
       const timestamp = Date.now();
       const failedFileName = `failed_leads_${timestamp}.csv`;
       const failedFilePath = path.join(__dirname, '../uploads/csv', failedFileName);
-      
+
       // Ensure directory exists
       const uploadDir = path.join(__dirname, '../uploads/csv');
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });
       }
-      
+
       // Create CSV content with headers
       const headers = ['name', 'email', 'contactNumber', 'comment', 'leadSource', 'presalesUser', 'failureReason'];
       let csvContent = headers.join(',') + '\n';
-      
+
       // Add failed entries data
       failedEntries.forEach(entry => {
         const row = [
@@ -818,7 +818,7 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
         ];
         csvContent += row.join(',') + '\n';
       });
-      
+
       // Write CSV file
       fs.writeFileSync(failedFilePath, csvContent, 'utf8');
       failedFileUrl = `/api/leads/download-failed/${failedFileName}`;
@@ -863,11 +863,11 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
-    
+
     if (error.message.includes('Missing required columns')) {
       return res.status(400).json({ error: error.message });
     }
-    
+
     res.status(500).json({ error: 'Failed to process bulk upload. Please try again.' });
   }
 });
@@ -878,14 +878,14 @@ router.get('/', authenticateToken, async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-    
+
     // Get user role for filtering
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
-    
+
     // Build filter for Lead table
     const filter = { deletedAt: null };
-    
+
     // Role-based filtering
     if (userRole === 'presales_agent') {
       filter.presalesUserId = req.user.userId;
@@ -896,10 +896,10 @@ router.get('/', authenticateToken, async (req, res) => {
     } else if (userRole === 'sales_agent') {
       const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
       const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
-      
+
       filter.salesUserId = req.user.userId;
       if (wonStatus || lostStatus) {
-        filter.leadStatusId = { 
+        filter.leadStatusId = {
           $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean)
         };
       }
@@ -919,7 +919,7 @@ router.get('/', authenticateToken, async (req, res) => {
         filter.leadStatusId = qualifiedStatus._id;
       }
     }
-    
+
     // Apply search filters
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, 'i');
@@ -929,46 +929,46 @@ router.get('/', authenticateToken, async (req, res) => {
         { contactNumber: searchRegex }
       ];
     }
-    
+
     if (req.query.source) {
       filter.sourceId = req.query.source;
     }
-    
+
     if (req.query.leadValue) {
       filter.leadValue = req.query.leadValue;
     }
-    
+
     if (req.query.centre) {
       filter.centreId = req.query.centre;
     }
-    
+
     if (req.query.assignedTo) {
       filter.$or = [
         { presalesUserId: req.query.assignedTo },
         { salesUserId: req.query.assignedTo }
       ];
     }
-    
+
     if (req.query.leadStatus) {
       filter.leadStatusId = req.query.leadStatus;
     }
-    
+
     if (req.query.leadSubStatus) {
       filter.leadSubStatusId = req.query.leadSubStatus;
     }
-    
+
     if (req.query.siteVisit) {
       filter.siteVisit = req.query.siteVisit === 'true';
     }
-    
+
     if (req.query.centerVisit) {
       filter.centerVisit = req.query.centerVisit === 'true';
     }
-    
+
     if (req.query.virtualMeeting) {
       filter.virtualMeeting = req.query.virtualMeeting === 'true';
     }
-    
+
     // Date range filters - status-based or creation-based with OR logic for activities
     if (req.query.dateFrom || req.query.dateTo) {
       const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom) : null;
@@ -977,14 +977,14 @@ router.get('/', authenticateToken, async (req, res) => {
         toDate.setHours(23, 59, 59, 999);
         return toDate;
       })() : null;
-      
+
       // Check if any activity filters are selected
       const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true';
-      
+
       if (hasActivityFilters) {
         // Use OR logic for activity date fields
         const activityDateConditions = [];
-        
+
         if (req.query.siteVisit === 'true') {
           const siteVisitCondition = {};
           if (dateFrom) siteVisitCondition.$gte = dateFrom;
@@ -993,7 +993,7 @@ router.get('/', authenticateToken, async (req, res) => {
             activityDateConditions.push({ siteVisitDate: siteVisitCondition });
           }
         }
-        
+
         if (req.query.centerVisit === 'true') {
           const centerVisitCondition = {};
           if (dateFrom) centerVisitCondition.$gte = dateFrom;
@@ -1002,7 +1002,7 @@ router.get('/', authenticateToken, async (req, res) => {
             activityDateConditions.push({ centerVisitDate: centerVisitCondition });
           }
         }
-        
+
         if (req.query.virtualMeeting === 'true') {
           const virtualMeetingCondition = {};
           if (dateFrom) virtualMeetingCondition.$gte = dateFrom;
@@ -1011,14 +1011,14 @@ router.get('/', authenticateToken, async (req, res) => {
             activityDateConditions.push({ virtualMeetingDate: virtualMeetingCondition });
           }
         }
-        
+
         if (activityDateConditions.length > 0) {
           filter.$or = filter.$or ? [...filter.$or, ...activityDateConditions] : activityDateConditions;
         }
       } else {
         // Use single date field logic for non-activity filters
         let dateField = 'createdAt'; // Default to creation date
-        
+
         // Use specific date fields based on status
         if (req.query.leadStatus) {
           const selectedStatus = await Status.findById(req.query.leadStatus);
@@ -1027,7 +1027,7 @@ router.get('/', authenticateToken, async (req, res) => {
           else if (selectedStatus?.slug === 'lost') dateField = 'leadLostDate';
           else if (selectedStatus?.slug === 'lead') dateField = 'createdAt';
         }
-        
+
         // Use specific substatus date fields
         if (req.query.leadSubStatus) {
           const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
@@ -1037,7 +1037,7 @@ router.get('/', authenticateToken, async (req, res) => {
           else if (selectedSubStatus?.slug === 'cif') dateField = 'cifDate';
           else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
         }
-        
+
         console.log('Using date field for filtering:', dateField);
         filter[dateField] = {};
         if (dateFrom) {
@@ -1090,10 +1090,10 @@ router.get('/export', authenticateToken, async (req, res) => {
     // Get user role for filtering
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
-    
+
     // Build filter for Lead table (same as main leads endpoint)
     const filter = { deletedAt: null };
-    
+
     // Role-based filtering
     if (userRole === 'presales_agent') {
       filter.presalesUserId = req.user.userId;
@@ -1104,10 +1104,10 @@ router.get('/export', authenticateToken, async (req, res) => {
     } else if (userRole === 'sales_agent') {
       const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
       const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
-      
+
       filter.salesUserId = req.user.userId;
       if (wonStatus || lostStatus) {
-        filter.leadStatusId = { 
+        filter.leadStatusId = {
           $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean)
         };
       }
@@ -1125,7 +1125,7 @@ router.get('/export', authenticateToken, async (req, res) => {
         filter.leadStatusId = qualifiedStatus._id;
       }
     }
-    
+
     // Apply search filters
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, 'i');
@@ -1135,7 +1135,7 @@ router.get('/export', authenticateToken, async (req, res) => {
         { contactNumber: searchRegex }
       ];
     }
-    
+
     if (req.query.source) filter.sourceId = req.query.source;
     if (req.query.leadValue) filter.leadValue = req.query.leadValue;
     if (req.query.centre) filter.centreId = req.query.centre;
@@ -1150,7 +1150,7 @@ router.get('/export', authenticateToken, async (req, res) => {
     if (req.query.siteVisit) filter.siteVisit = req.query.siteVisit === 'true';
     if (req.query.centerVisit) filter.centerVisit = req.query.centerVisit === 'true';
     if (req.query.virtualMeeting) filter.virtualMeeting = req.query.virtualMeeting === 'true';
-    
+
     // Date range filters with OR logic for activities
     if (req.query.dateFrom || req.query.dateTo) {
       const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom) : null;
@@ -1159,14 +1159,14 @@ router.get('/export', authenticateToken, async (req, res) => {
         toDate.setHours(23, 59, 59, 999);
         return toDate;
       })() : null;
-      
+
       // Check if any activity filters are selected
       const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true';
-      
+
       if (hasActivityFilters) {
         // Use OR logic for activity date fields
         const activityDateConditions = [];
-        
+
         if (req.query.siteVisit === 'true') {
           const siteVisitCondition = {};
           if (dateFrom) siteVisitCondition.$gte = dateFrom;
@@ -1175,7 +1175,7 @@ router.get('/export', authenticateToken, async (req, res) => {
             activityDateConditions.push({ siteVisitDate: siteVisitCondition });
           }
         }
-        
+
         if (req.query.centerVisit === 'true') {
           const centerVisitCondition = {};
           if (dateFrom) centerVisitCondition.$gte = dateFrom;
@@ -1184,7 +1184,7 @@ router.get('/export', authenticateToken, async (req, res) => {
             activityDateConditions.push({ centerVisitDate: centerVisitCondition });
           }
         }
-        
+
         if (req.query.virtualMeeting === 'true') {
           const virtualMeetingCondition = {};
           if (dateFrom) virtualMeetingCondition.$gte = dateFrom;
@@ -1193,14 +1193,14 @@ router.get('/export', authenticateToken, async (req, res) => {
             activityDateConditions.push({ virtualMeetingDate: virtualMeetingCondition });
           }
         }
-        
+
         if (activityDateConditions.length > 0) {
           filter.$or = filter.$or ? [...filter.$or, ...activityDateConditions] : activityDateConditions;
         }
       } else {
         // Use single date field logic for non-activity filters
         let dateField = 'createdAt';
-        
+
         if (req.query.leadStatus) {
           const selectedStatus = await Status.findById(req.query.leadStatus);
           if (selectedStatus?.slug === 'won') dateField = 'leadWonDate';
@@ -1208,7 +1208,7 @@ router.get('/export', authenticateToken, async (req, res) => {
           else if (selectedStatus?.slug === 'qualified') dateField = 'qualifiedDate';
           else if (selectedStatus?.slug === 'lead') dateField = 'createdAt';
         }
-        
+
         if (req.query.leadSubStatus) {
           const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
           if (selectedSubStatus?.slug === 'hot') dateField = 'hotDate';
@@ -1217,7 +1217,7 @@ router.get('/export', authenticateToken, async (req, res) => {
           else if (selectedSubStatus?.slug === 'cif') dateField = 'cifDate';
           else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
         }
-        
+
         filter[dateField] = {};
         if (dateFrom) {
           filter[dateField].$gte = dateFrom;
@@ -1326,7 +1326,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     // Get user role for access control
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
-    
+
     // Find the lead
     const lead = await Lead.findById(req.params.id)
       .populate([
@@ -1345,12 +1345,12 @@ router.get('/:id', authenticateToken, async (req, res) => {
     if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
     }
-    
+
     // Check center access for HOD sales
     if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
       return res.status(403).json({ error: 'Access denied: Lead not from your center' });
     }
-    
+
     // Check center and qualified status access for sales manager
     if (userRole === 'sales_manager') {
       if (!lead.centreId || !lead.centreId.equals(user.centreId)) {
@@ -1437,10 +1437,10 @@ router.get('/:id/timeline', authenticateToken, async (req, res) => {
 // Create call log
 router.post('/:id/call', authenticateToken, async (req, res) => {
   try {
-    
+
     // Determine the actual Lead ID
     let actualLeadId = null;
-    
+
     // Try to find as LeadActivity first
     try {
       const leadActivity = await LeadActivity.findById(req.params.id);
@@ -1464,10 +1464,10 @@ router.post('/:id/call', authenticateToken, async (req, res) => {
       leadId: actualLeadId,
       dateTime: new Date()
     });
-    
+
     await callLog.save();
     await callLog.populate('userId', 'name email');
-    
+
     res.status(201).json({ message: 'Call log created successfully', callLog });
   } catch (error) {
     console.error('Error creating call log:', error);
@@ -1479,14 +1479,14 @@ router.post('/:id/call', authenticateToken, async (req, res) => {
 router.post('/:id/activity', authenticateToken, documentUpload.single('document'), async (req, res) => {
   try {
     const { type, comment } = req.body;
-    
+
     if (!type || !comment) {
       return res.status(400).json({ error: 'Type and comment are required' });
     }
 
     // Determine the actual Lead ID
     let actualLeadId = null;
-    
+
     // Try to find as LeadActivity first
     try {
       const leadActivity = await LeadActivity.findById(req.params.id);
@@ -1515,7 +1515,7 @@ router.post('/:id/activity', authenticateToken, documentUpload.single('document'
 
     await activityLog.save();
     await activityLog.populate('userId', 'name email');
-    
+
     res.status(201).json({ message: 'Activity logged successfully', data: activityLog });
   } catch (error) {
     console.error('Error creating activity log:', error);
@@ -1528,22 +1528,22 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
   try {
     console.log('Presales activity endpoint called with:', req.params.id);
     console.log('Request body:', req.body);
-    
+
     // Get user role for access control
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
-    
+
     // Find the lead
     const lead = await Lead.findById(req.params.id);
     if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
     }
-    
+
     // Check center access for HOD sales
     if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
       return res.status(403).json({ error: 'Access denied: Lead not from your center' });
     }
-    
+
     // Check center and qualified status access for sales manager
     if (userRole === 'sales_manager') {
       if (!lead.centreId || !lead.centreId.equals(user.centreId)) {
@@ -1581,7 +1581,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
     } else {
       updatedData.cifDate = lead.cifDate;
     }
-    
+
     if (req.body.meetingArrangedDate !== undefined) {
       updatedData.meetingArrangedDate = req.body.meetingArrangedDate ? new Date(req.body.meetingArrangedDate) : null;
     } else {
@@ -1602,11 +1602,11 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
     if (req.body.leadStatusId && req.body.leadStatusId !== lead.leadStatusId?.toString()) {
       const leadStatus = await Status.findById(req.body.leadStatusId);
       console.log('Lead status check:', leadStatus?.slug);
-      
+
       if (leadStatus && leadStatus.slug === 'qualified') {
         console.log('Lead status changed to qualified, assigning to sales team');
         updatedData.qualifiedDate = new Date();
-        
+
         // Auto-assign to sales team using round robin with centre and language
         const salesAgent = await getNextSalesAgent(updatedData.centreId, updatedData.languageId);
         if (salesAgent) {
@@ -1614,7 +1614,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
           updatedData.salesUserId = salesAgent._id;
           updatedData.presalesUserId = null; // Clear presales assignment
         }
-        
+
         // Set sub-status to hot
         const hotSubStatus = await Status.findOne({ slug: 'hot', type: 'leadSubStatus' });
         if (hotSubStatus) {
@@ -1640,7 +1640,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
         updatedData.meetingArrangedDate = null;
       }
     }
-    
+
     // Check if substatus changed
     if (req.body.leadSubStatusId && req.body.leadSubStatusId !== lead.leadSubStatusId?.toString()) {
       const subStatus = await Status.findById(req.body.leadSubStatusId);
@@ -1673,9 +1673,9 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
 
     console.log('Lead updated successfully');
 
-    res.status(200).json({ 
-      message: 'Lead updated successfully', 
-      lead: lead 
+    res.status(200).json({
+      message: 'Lead updated successfully',
+      lead: lead
     });
   } catch (error) {
     console.error('Error updating lead:', error);
@@ -1689,18 +1689,18 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
     // Get user role for access control
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
-    
+
     // Find the lead
     const lead = await Lead.findById(req.params.id);
     if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
     }
-    
+
     // Check center access for HOD sales
     if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
       return res.status(403).json({ error: 'Access denied: Lead not from your center' });
     }
-    
+
     // Check center and qualified status access for sales manager
     if (userRole === 'sales_manager') {
       if (!lead.centreId || !lead.centreId.equals(user.centreId)) {
@@ -1744,7 +1744,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
     } else {
       updatedData.cifDate = lead.cifDate;
     }
-    
+
     if (req.body.meetingArrangedDate !== undefined) {
       updatedData.meetingArrangedDate = req.body.meetingArrangedDate ? new Date(req.body.meetingArrangedDate) : null;
     } else {
@@ -1766,7 +1766,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       const leadStatus = await Status.findById(req.body.leadStatusId);
       if (leadStatus && leadStatus.slug === 'qualified') {
         updatedData.qualifiedDate = new Date();
-        
+
         // Use provided salesUserId or auto-assign using round robin
         if (req.body.salesUserId) {
           updatedData.salesUserId = req.body.salesUserId;
@@ -1776,10 +1776,10 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
             updatedData.salesUserId = salesAgent._id;
           }
         }
-        
+
         // Clear presales assignment when moving to sales
         updatedData.presalesUserId = null;
-        
+
         // Set default sub-status for qualified leads
         if (!req.body.leadSubStatusId) {
           const hotSubStatus = await Status.findOne({ slug: 'hot', type: 'leadSubStatus' });
@@ -1804,7 +1804,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
         updatedData.meetingArrangedDate = null;
       }
     }
-    
+
     // Check if substatus changed
     if (req.body.leadSubStatusId && req.body.leadSubStatusId !== lead.leadSubStatusId?.toString()) {
       const subStatus = await Status.findById(req.body.leadSubStatusId);
@@ -1833,9 +1833,9 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       { path: 'leadSubStatusId', select: 'name slug' }
     ]);
 
-    res.status(200).json({ 
-      message: 'Lead updated successfully', 
-      lead: lead 
+    res.status(200).json({
+      message: 'Lead updated successfully',
+      lead: lead
     });
   } catch (error) {
     console.error('Error updating lead:', error);
@@ -1849,17 +1849,17 @@ router.put('/:id', authenticateToken, async (req, res) => {
     // Get user role for access control
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
-    
+
     const lead = await Lead.findById(req.params.id);
     if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
     }
-    
+
     // Check center access for HOD sales
     if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
       return res.status(403).json({ error: 'Access denied: Lead not from your center' });
     }
-    
+
     // Check center and qualified status access for sales manager
     if (userRole === 'sales_manager') {
       if (!lead.centreId || !lead.centreId.equals(user.centreId)) {
@@ -1877,7 +1877,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
         lead[key] = req.body[key];
       }
     });
-    
+
     // Check if lead status changed and set appropriate dates
     if (req.body.leadStatusId && req.body.leadStatusId !== lead.leadStatusId?.toString()) {
       const leadStatus = await Status.findById(req.body.leadStatusId);
@@ -1889,7 +1889,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
         lead.leadLostDate = new Date();
       }
     }
-    
+
     // Check if substatus changed and set appropriate dates
     if (req.body.leadSubStatusId && req.body.leadSubStatusId !== lead.leadSubStatusId?.toString()) {
       const subStatus = await Status.findById(req.body.leadSubStatusId);
@@ -1901,7 +1901,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 
     await lead.save();
-    
+
     // Populate the response
     await lead.populate([
       { path: 'presalesUserId', select: 'name email' },
@@ -1951,7 +1951,7 @@ router.delete('/:id', async (req, res) => {
 router.post('/:id/assign', authenticateToken, async (req, res) => {
   try {
     const { presalesUserId, salesUserId } = req.body;
-    
+
     const lead = await Lead.findById(req.params.id);
     if (!lead || lead.deletedAt) {
       return res.status(404).json({ error: 'Lead not found' });
@@ -1983,29 +1983,29 @@ async function getNextPresalesAgentForLanguage(languageId) {
   const activeStatus = await Status.findOne({ slug: 'active' });
   if (!presalesRole || !activeStatus) return null;
 
-  const presalesAgents = await User.find({ 
+  const presalesAgents = await User.find({
     roleId: presalesRole._id,
     statusId: activeStatus._id,
     languageIds: languageId,
-    deletedAt: null 
+    deletedAt: null
   }).sort({ name: 1 });
-  
+
   if (presalesAgents.length === 0) return null;
-  
+
   if (!languageRoundRobin[languageId]) {
     languageRoundRobin[languageId] = 0;
   }
-  
+
   const agent = presalesAgents[languageRoundRobin[languageId] % presalesAgents.length];
   languageRoundRobin[languageId]++;
-  
+
   return agent;
 }
 
 // Helper function to check if user can handle specific language
 function userCanHandleLanguage(user, languageId) {
   if (!user.languageIds || !languageId) return false;
-  return user.languageIds.some(lang => 
+  return user.languageIds.some(lang =>
     (typeof lang === 'string' ? lang : lang._id || lang).toString() === languageId.toString()
   );
 }
@@ -2014,7 +2014,7 @@ function userCanHandleLanguage(user, languageId) {
 router.post('/:id/change-language', authenticateToken, async (req, res) => {
   try {
     const { languageId } = req.body;
-    
+
     if (!languageId) {
       return res.status(400).json({ error: 'Language ID is required' });
     }
@@ -2039,7 +2039,7 @@ router.post('/:id/change-language', authenticateToken, async (req, res) => {
       assignmentMessage = 'Language changed. Lead remains with current user.';
     } else {
       const availableAgent = await getNextPresalesAgentForLanguage(languageId);
-      
+
       if (availableAgent) {
         assignedUserId = availableAgent._id;
         assignmentMessage = `Language changed. Lead reassigned to ${availableAgent.name} via round-robin.`;
@@ -2053,7 +2053,7 @@ router.post('/:id/change-language', authenticateToken, async (req, res) => {
     lead.presalesUserId = assignedUserId;
     lead.updatedPerson = req.user.userId;
     lead.comment = assignmentMessage;
-    
+
     await lead.save();
 
     await lead.populate([
@@ -2068,7 +2068,7 @@ router.post('/:id/change-language', authenticateToken, async (req, res) => {
       { path: 'leadSubStatusId', select: 'name slug' }
     ]);
 
-    res.json({ 
+    res.json({
       message: assignmentMessage,
       lead: lead
     });
@@ -2082,7 +2082,7 @@ router.post('/:id/change-language', authenticateToken, async (req, res) => {
 router.get('/download-failed/:filename', (req, res) => {
   const filename = req.params.filename;
   const filePath = path.join(__dirname, '../uploads/csv', filename);
-  
+
   if (fs.existsSync(filePath)) {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -2096,21 +2096,21 @@ router.get('/download-failed/:filename', (req, res) => {
 router.post('/webhook/google-ads', async (req, res) => {
   try {
     console.log('Google Ads webhook received:', req.body);
-    
+
     // Validate Google key
     if (req.body.google_key !== process.env.GOOGLE_ADS_WEBHOOK_KEY) {
       console.log('Invalid Google key:', req.body.google_key);
       return res.status(200).json({});
     }
-    
+
     // Store webhook data in history
     const historyData = new GoogleAdsHistory(req.body);
     await historyData.save();
-    
+
     // Extract data from user_column_data
     const userData = req.body.user_column_data || [];
     let name = '', email = '', phone = '';
-    
+
     userData.forEach(item => {
       if (item.column_id === 'FULL_NAME') {
         name = item.string_value;
@@ -2120,7 +2120,7 @@ router.post('/webhook/google-ads', async (req, res) => {
         if (!phone) phone = item.string_value;
       }
     });
-    
+
     // Clean phone number (remove +1, spaces, etc.)
     if (phone) {
       phone = phone.replace(/[^\d]/g, '');
@@ -2128,14 +2128,14 @@ router.post('/webhook/google-ads', async (req, res) => {
         phone = phone.substring(1);
       }
     }
-    
+
     // Validate required fields
     if (!phone || phone.length !== 10) {
       historyData.error = 'Invalid phone number format';
       await historyData.save();
       return res.status(400).json({ error: 'Valid 10-digit phone number is required' });
     }
-    
+
     // Get or create Google Ads lead source
     let leadSource = await LeadSource.findOne({ slug: 'google' });
     if (!leadSource) {
@@ -2146,13 +2146,13 @@ router.post('/webhook/google-ads', async (req, res) => {
       });
       await leadSource.save();
     }
-    
+
     // Get lead status
     const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-    
+
     // Get next presales agent
     const presalesAgent = await getNextPresalesAgent();
-    
+
     // Prepare lead data
     const leadData = {
       name: name || '',
@@ -2161,7 +2161,7 @@ router.post('/webhook/google-ads', async (req, res) => {
       sourceId: leadSource._id,
       comment: `Google Ads Lead - Campaign ID: ${req.body.campaign_id || 'N/A'}, Ad Group ID: ${req.body.adgroup_id || 'N/A'}, Form ID: ${req.body.form_id || 'N/A'}`
     };
-    
+
     // Assign to presales agent and set status
     if (presalesAgent) {
       leadData.presalesUserId = presalesAgent._id;
@@ -2169,28 +2169,28 @@ router.post('/webhook/google-ads', async (req, res) => {
     if (leadStatus) {
       leadData.leadStatusId = leadStatus._id;
     }
-    
+
     // Create lead
     const lead = new Lead(leadData);
     await lead.save();
-    
+
     // Create initial lead activity snapshot
     const leadActivity = new LeadActivity({
       leadId: lead._id,
       ...leadData
     });
     await leadActivity.save();
-    
+
     // Update history with created lead ID
     historyData.leadId = lead._id;
     historyData.processed = true;
     await historyData.save();
-    
+
     res.status(200).json({});
-    
+
   } catch (error) {
     console.error('Google Ads webhook error:', error);
-    
+
     // Update history with error if it exists
     if (req.body.lead_id) {
       try {
@@ -2202,7 +2202,7 @@ router.post('/webhook/google-ads', async (req, res) => {
         console.error('Error updating history:', updateError);
       }
     }
-    
+
     res.status(200).json({});
   }
 });
@@ -2210,11 +2210,11 @@ router.post('/webhook/google-ads', async (req, res) => {
 // Meta Ads webhook verification (GET)
 router.get('/webhook/meta-ads', (req, res) => {
   const verifyToken = process.env.META_ADS_WEBHOOK_KEY || 'reminiscent';
-  
+
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
-  
+
   if (mode === 'subscribe' && token === verifyToken) {
     console.log('Meta webhook verified successfully');
     res.status(200).send(challenge);
@@ -2227,64 +2227,35 @@ router.get('/webhook/meta-ads', (req, res) => {
 // Meta Ads webhook endpoint (POST)
 router.post('/webhook/meta-ads', async (req, res) => {
   try {
-    console.log('Meta Ads webhook received:', req.body);
-    
-    // Validate secret key
-    if (req.body.secret !== process.env.META_ADS_WEBHOOK_KEY) {
-      console.log('Invalid Meta secret:', req.body.secret);
-      return res.status(200).json({});
+    if (req.body.entry) {
+      for (let entry of req.body.entry) {
+        if (entry.changes) {
+          for (let change of entry.changes) {
+            if (change.field === 'leadgen') {
+              const { leadgen_id, form_id, ad_id, adgroup_id, page_id, created_time } = change.value;
+
+              console.log("✅ New Lead Notification:");
+              console.log("Lead ID:", leadgen_id);
+              console.log("Form ID:", form_id);
+              console.log("Ad ID:", ad_id);
+              console.log("AdGroup ID:", adgroup_id);
+              console.log("Page ID:", page_id);
+              console.log("Created Time:", created_time);
+
+              // 🔹 Now you must fetch full lead details from Graph API:
+              // GET https://graph.facebook.com/v20.0/{leadgen_id}?access_token={PAGE_ACCESS_TOKEN}
+              // This returns the actual form answers (name, email, phone, etc.)
+
+              // Example pseudo DB insert
+              // await LeadModel.create({ leadgen_id, form_id, ad_id, adgroup_id, page_id, created_time });
+            }
+          }
+        }
+      }
     }
-    
-    const { full_name, email, created_time, ad_id, adset_id, campaign_id } = req.body;
-    
-    // Get or create Meta lead source
-    let leadSource = await LeadSource.findOne({ slug: 'facebook' });
-    if (!leadSource) {
-      leadSource = new LeadSource({
-        name: 'Facebook',
-        slug: 'facebook',
-        description: 'Leads from Meta Ads campaigns'
-      });
-      await leadSource.save();
-    }
-    
-    // Get lead status
-    const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-    
-    // Get next presales agent
-    const presalesAgent = await getNextPresalesAgent();
-    
-    // Prepare lead data
-    const leadData = {
-      name: full_name || '',
-      email: email || '',
-      contactNumber: '0000000000', // Placeholder since Meta doesn't provide phone
-      sourceId: leadSource._id,
-      comment: `Meta Ads Lead - Campaign: ${campaign_id || 'N/A'}, AdSet: ${adset_id || 'N/A'}, Ad: ${ad_id || 'N/A'}, Created: ${created_time || 'N/A'}`
-    };
-    
-    // Assign to presales agent and set status
-    if (presalesAgent) {
-      leadData.presalesUserId = presalesAgent._id;
-    }
-    if (leadStatus) {
-      leadData.leadStatusId = leadStatus._id;
-    }
-    
-    // Create lead
-    const lead = new Lead(leadData);
-    await lead.save();
-    
-    // Create initial lead activity snapshot
-    const leadActivity = new LeadActivity({
-      leadId: lead._id,
-      ...leadData
-    });
-    await leadActivity.save();
-    
-    console.log('Meta lead created:', lead._id);
+
     res.status(200).json({});
-    
+
   } catch (error) {
     console.error('Meta Ads webhook error:', error);
     res.status(200).json({});
@@ -2295,7 +2266,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
 router.get('/document/:filename', (req, res) => {
   const filename = req.params.filename;
   const filePath = path.join(__dirname, '../uploads/documents', filename);
-  
+
   if (fs.existsSync(filePath)) {
     const ext = path.extname(filename).toLowerCase();
     const mimeTypes = {
@@ -2306,7 +2277,7 @@ router.get('/document/:filename', (req, res) => {
       '.jpeg': 'image/jpeg',
       '.png': 'image/png'
     };
-    
+
     const contentType = mimeTypes[ext] || 'application/octet-stream';
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
