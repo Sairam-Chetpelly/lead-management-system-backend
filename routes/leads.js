@@ -4,6 +4,7 @@ const multer = require('multer');
 const csv = require('csv-parser');
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios');
 const Lead = require('../models/Lead');
 const LeadActivity = require('../models/LeadActivity');
 const User = require('../models/User');
@@ -2228,6 +2229,7 @@ router.get('/webhook/meta-ads', (req, res) => {
 router.post('/webhook/meta-ads', async (req, res) => {
   try {
     console.log('Meta Ads webhook received:', JSON.stringify(req.body));
+    
     if (req.body.entry) {
       for (let entry of req.body.entry) {
         if (entry.changes) {
@@ -2243,12 +2245,97 @@ router.post('/webhook/meta-ads', async (req, res) => {
               console.log("Page ID:", page_id);
               console.log("Created Time:", created_time);
 
-              // 🔹 Now you must fetch full lead details from Graph API:
-              // GET https://graph.facebook.com/v20.0/{leadgen_id}?access_token={PAGE_ACCESS_TOKEN}
-              // This returns the actual form answers (name, email, phone, etc.)
+              // Fetch lead details from Graph API
+              try {
+                const axios = require('axios');
+                const graphResponse = await axios.get(
+                  `https://graph.facebook.com/v20.0/${leadgen_id}`,
+                  {
+                    params: {
+                      access_token: process.env.META_PAGE_ACCESS_TOKEN,
+                      fields: 'field_data'
+                    }
+                  }
+                );
 
-              // Example pseudo DB insert
-              // await LeadModel.create({ leadgen_id, form_id, ad_id, adgroup_id, page_id, created_time });
+                const fieldData = graphResponse.data.field_data || [];
+                let name = '', email = '', phone_number = '';
+
+                // Extract form data
+                fieldData.forEach(field => {
+                  const fieldName = field.name?.toLowerCase();
+                  const value = field.values?.[0] || '';
+                  
+                  if (fieldName?.includes('name') || fieldName?.includes('full_name')) {
+                    name = value;
+                  } else if (fieldName?.includes('email')) {
+                    email = value;
+                  } else if (fieldName?.includes('phone_number')) {
+                    phone_number = value.replace(/[^\d]/g, '');
+                  }
+                });
+
+                // Clean phone_number number
+                if (phone_number && phone_number.length > 10) {
+                  phone_number = phone_number.slice(-10); // Take last 10 digits
+                }
+
+                // Validate phone_number number
+                if (!phone_number || phone_number.length !== 10) {
+                  console.log('Invalid phone_number number:', phone_number);
+                  continue;
+                }
+
+                // Get or create Meta lead source
+                let leadSource = await LeadSource.findOne({ slug: 'facebook' });
+                if (!leadSource) {
+                  leadSource = new LeadSource({
+                    name: 'Facebook',
+                    slug: 'facebook',
+                    description: 'Leads from Meta Ads campaigns'
+                  });
+                  await leadSource.save();
+                }
+
+                // Get lead status
+                const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+
+                // Get next presales agent
+                const presalesAgent = await getNextPresalesAgent();
+
+                // Prepare lead data
+                const leadData = {
+                  name: name || '',
+                  email: email || '',
+                  contactNumber: phone_number,
+                  sourceId: leadSource._id,
+                  comment: `Meta Ads Lead - Lead ID: ${leadgen_id}, Form: ${form_id}, Ad: ${ad_id}, AdGroup: ${adgroup_id}, Page: ${page_id}`
+                };
+
+                // Assign to presales agent and set status
+                if (presalesAgent) {
+                  leadData.presalesUserId = presalesAgent._id;
+                }
+                if (leadStatus) {
+                  leadData.leadStatusId = leadStatus._id;
+                }
+
+                // Create lead
+                const lead = new Lead(leadData);
+                await lead.save();
+
+                // Create initial lead activity snapshot
+                const leadActivity = new LeadActivity({
+                  leadId: lead._id,
+                  ...leadData
+                });
+                await leadActivity.save();
+
+                console.log('Meta lead created:', lead.leadID);
+
+              } catch (graphError) {
+                console.error('Error fetching lead from Graph API:', graphError.response?.data || graphError.message);
+              }
             }
           }
         }
