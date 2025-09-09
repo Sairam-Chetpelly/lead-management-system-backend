@@ -2122,12 +2122,9 @@ router.post('/webhook/google-ads', async (req, res) => {
       }
     });
 
-    // Clean phone number (remove +1, spaces, etc.)
+    // Clean phone number - take last 10 digits only
     if (phone) {
-      phone = phone.replace(/[^\d]/g, '');
-      if (phone.startsWith('1') && phone.length === 11) {
-        phone = phone.substring(1);
-      }
+      phone = phone.replace(/[^\d]/g, '').slice(-10);
     }
 
     // Validate required fields
@@ -2253,13 +2250,16 @@ router.post('/webhook/meta-ads', async (req, res) => {
                   {
                     params: {
                       access_token: process.env.META_PAGE_ACCESS_TOKEN,
-                      fields: 'field_data'
+                      fields: 'created_time,field_data,ad_id,form_id,platform'
                     }
                   }
                 );
 
-                const fieldData = graphResponse.data.field_data || [];
+                console.log("✅ Graph API Response:", JSON.stringify(graphResponse.data));
+                const leadInfo = graphResponse.data;
+                const fieldData = leadInfo.field_data || [];
                 let name = '', email = '', phone_number = '';
+                const platform = leadInfo.platform || 'UNKNOWN';
 
                 // Extract form data
                 fieldData.forEach(field => {
@@ -2275,9 +2275,9 @@ router.post('/webhook/meta-ads', async (req, res) => {
                   }
                 });
 
-                // Clean phone_number number
-                if (phone_number && phone_number.length > 10) {
-                  phone_number = phone_number.slice(-10); // Take last 10 digits
+                // Clean phone number - take last 10 digits only
+                if (phone_number) {
+                  phone_number = phone_number.replace(/[^\d]/g, '').slice(-10);
                 }
 
                 // Validate phone_number number
