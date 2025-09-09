@@ -2249,7 +2249,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
               try {
                 const axios = require('axios');
                 const graphResponse = await axios.get(
-                  `https://graph.facebook.com/v20.0/${leadgen_id}`,
+                  `https://graph.facebook.com/v23.0/${leadgen_id}`,
                   {
                     params: {
                       access_token: process.env.META_PAGE_ACCESS_TOKEN,
