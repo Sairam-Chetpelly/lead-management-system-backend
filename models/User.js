@@ -63,12 +63,15 @@ const userSchema = new mongoose.Schema({
   },
   userType: {
     type: String,
-    enum: ['regular', 'cp_presales'],
+    enum: {
+      values: ['regular', 'cp_presales'],
+      message: '{VALUE} is not a valid user type'
+    },
     required: false,
     validate: {
       validator: async function(value) {
-        // Allow undefined or null values
-        if (!value) return true;
+        // Allow undefined, null, or empty string values
+        if (!value || value === '') return true;
         if (!this.roleId) return true;
         const role = await mongoose.model('Role').findById(this.roleId);
         if (role && role.slug === 'presales_agent') {
@@ -99,15 +102,18 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
+userSchema.pre('validate', function(next) {
+  // Clean up empty string userType before validation
+  if (this.userType === '') {
+    this.userType = undefined;
+  }
+  next();
+});
+
 userSchema.pre('save', async function(next) {
   if (!this.userId) {
     const count = await mongoose.model('User').countDocuments();
     this.userId = `USR${String(count + 1).padStart(6, '0')}`;
-  }
-  
-  // Clean up empty string userType
-  if (this.userType === '') {
-    this.userType = undefined;
   }
   
   if (!this.isModified('password')) return next();

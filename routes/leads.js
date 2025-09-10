@@ -18,6 +18,7 @@ const CallLog = require('../models/CallLog');
 const ActivityLog = require('../models/ActivityLog');
 const GoogleAdsHistory = require('../models/GoogleAdsHistory');
 const { authenticateToken } = require('../middleware/auth');
+const { refreshMetaToken } = require('../utils/metaTokenRefresh');
 
 const router = express.Router();
 
@@ -2244,23 +2245,37 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
               // Fetch lead details from Graph API
               try {
-                const axios = require('axios');
-                const graphResponse = await axios.get(
-                  `https://graph.facebook.com/v23.0/${leadgen_id}`,
-                  {
-                    params: {
-                      access_token: process.env.META_PAGE_ACCESS_TOKEN,
-                      fields: 'created_time,field_data,ad_id,form_id,platform'
+                let graphResponse;
+                try {
+                  graphResponse = await axios.get(
+                    `https://graph.facebook.com/v23.0/${leadgen_id}`,
+                    {
+                      params: {
+                        access_token: process.env.META_USER_ACCESS_TOKEN,
+                        fields: 'field_data'
+                      }
                     }
+                  );
+                } catch (tokenError) {
+                  if (tokenError.response?.status === 401) {
+                    console.log('Token expired, refreshing...');
+                    await refreshMetaToken();
+                    graphResponse = await axios.get(
+                      `https://graph.facebook.com/v23.0/${leadgen_id}`,
+                      {
+                        params: {
+                          access_token: process.env.META_USER_ACCESS_TOKEN,
+                          fields: 'field_data'
+                        }
+                      }
+                    );
+                  } else {
+                    throw tokenError;
                   }
-                );
+                }
 
-                console.log("✅ Graph API Response:", JSON.stringify(graphResponse.data));
-                const leadInfo = graphResponse.data;
-                const fieldData = leadInfo.field_data || [];
+                const fieldData = graphResponse.data.field_data || [];
                 let name = '', email = '', phone_number = '';
-                const platform = leadInfo.platform || 'UNKNOWN';
-                console.log("Platform:", platform);
 
                 // Extract form data
                 fieldData.forEach(field => {
