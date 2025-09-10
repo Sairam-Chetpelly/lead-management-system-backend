@@ -18,7 +18,7 @@ const CallLog = require('../models/CallLog');
 const ActivityLog = require('../models/ActivityLog');
 const GoogleAdsHistory = require('../models/GoogleAdsHistory');
 const { authenticateToken } = require('../middleware/auth');
-const { refreshMetaToken } = require('../utils/metaTokenRefresh');
+const { refreshMetaToken, getCurrentToken } = require('../utils/metaTokenRefresh');
 
 const router = express.Router();
 
@@ -927,6 +927,7 @@ router.get('/', authenticateToken, async (req, res) => {
       const searchRegex = new RegExp(req.query.search, 'i');
       filter.$or = [
         { name: searchRegex },
+        { leadID: searchRegex },
         { email: searchRegex },
         { contactNumber: searchRegex }
       ];
@@ -1050,6 +1051,11 @@ router.get('/', authenticateToken, async (req, res) => {
         }
       }
     }
+    // Handle sorting
+    const sortBy = req.query.sortBy || 'createdAt';
+    const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+    const sortObj = { [sortBy]: sortOrder };
+
     // Get leads from Lead table
     const [leads, total] = await Promise.all([
       Lead.find(filter)
@@ -1064,7 +1070,7 @@ router.get('/', authenticateToken, async (req, res) => {
           { path: 'leadStatusId', select: 'name slug' },
           { path: 'leadSubStatusId', select: 'name slug' }
         ])
-        .sort({ createdAt: -1 })
+        .sort(sortObj)
         .skip(skip)
         .limit(limit),
       Lead.countDocuments(filter)
@@ -1133,6 +1139,7 @@ router.get('/export', authenticateToken, async (req, res) => {
       const searchRegex = new RegExp(req.query.search, 'i');
       filter.$or = [
         { name: searchRegex },
+        { leadID: searchRegex },
         { email: searchRegex },
         { contactNumber: searchRegex }
       ];
@@ -1230,6 +1237,11 @@ router.get('/export', authenticateToken, async (req, res) => {
       }
     }
 
+    // Handle sorting for export
+    const sortBy = req.query.sortBy || 'createdAt';
+    const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+    const sortObj = { [sortBy]: sortOrder };
+
     const leads = await Lead.find(filter)
       .populate([
         { path: 'presalesUserId', select: 'name email' },
@@ -1243,7 +1255,7 @@ router.get('/export', authenticateToken, async (req, res) => {
         { path: 'leadStatusId', select: 'name slug' },
         { path: 'leadSubStatusId', select: 'name slug' }
       ])
-      .sort({ createdAt: -1 });
+      .sort(sortObj);
 
     const csvData = leads.map(lead => ({
       'Lead ID': lead.leadID,
@@ -2112,6 +2124,7 @@ router.post('/webhook/google-ads', async (req, res) => {
     // Extract data from user_column_data
     const userData = req.body.user_column_data || [];
     let name = '', email = '', phone = '';
+    const ignoredFields = [];
 
     userData.forEach(item => {
       if (item.column_id === 'FULL_NAME') {
@@ -2120,6 +2133,9 @@ router.post('/webhook/google-ads', async (req, res) => {
         email = item.string_value;
       } else if (item.column_id === 'PHONE_NUMBER' || item.column_id === 'WORK_PHONE') {
         if (!phone) phone = item.string_value;
+      } else {
+        // Collect all other ignored fields
+        ignoredFields.push(`${item.column_id}: ${item.string_value || item.int_value || item.float_value || 'N/A'}`);
       }
     });
 
@@ -2152,13 +2168,20 @@ router.post('/webhook/google-ads', async (req, res) => {
     // Get next presales agent
     const presalesAgent = await getNextPresalesAgent();
 
+    // Prepare comment with ignored fields
+    let comment = `Google Ads Lead - Campaign ID: ${req.body.campaign_id || 'N/A'}, Ad Group ID: ${req.body.adgroup_id || 'N/A'}, Form ID: ${req.body.form_id || 'N/A'}`;
+    
+    if (ignoredFields.length > 0) {
+      comment += ` | Additional Fields: ${ignoredFields.join(', ')}`;
+    }
+
     // Prepare lead data
     const leadData = {
       name: name || '',
       email: email || '',
       contactNumber: phone,
       sourceId: leadSource._id,
-      comment: `Google Ads Lead - Campaign ID: ${req.body.campaign_id || 'N/A'}, Ad Group ID: ${req.body.adgroup_id || 'N/A'}, Form ID: ${req.body.form_id || 'N/A'}`
+      comment: comment
     };
 
     // Assign to presales agent and set status
@@ -2251,7 +2274,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     `https://graph.facebook.com/v23.0/${leadgen_id}`,
                     {
                       params: {
-                        access_token: process.env.META_USER_ACCESS_TOKEN,
+                        access_token: await getCurrentToken(),
                         fields: 'field_data'
                       }
                     }
@@ -2264,7 +2287,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                       `https://graph.facebook.com/v23.0/${leadgen_id}`,
                       {
                         params: {
-                          access_token: process.env.META_USER_ACCESS_TOKEN,
+                          access_token: await getCurrentToken(),
                           fields: 'field_data'
                         }
                       }
@@ -2276,8 +2299,9 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
                 const fieldData = graphResponse.data.field_data || [];
                 let name = '', email = '', phone_number = '';
+                const extraFields = [];
 
-                // Extract form data
+                // Extract form data and collect extra fields
                 fieldData.forEach(field => {
                   const fieldName = field.name?.toLowerCase();
                   const value = field.values?.[0] || '';
@@ -2288,6 +2312,9 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     email = value;
                   } else if (fieldName?.includes('phone_number')) {
                     phone_number = value.replace(/[^\d]/g, '');
+                  } else {
+                    // Collect all other fields as extra information
+                    extraFields.push(`${field.name}: ${value}`);
                   }
                 });
 
@@ -2319,13 +2346,20 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 // Get next presales agent
                 const presalesAgent = await getNextPresalesAgent();
 
+                // Prepare comment with ignored fields
+                let comment = `Meta Ads Lead - Lead ID: ${leadgen_id}, Form: ${form_id}, Ad: ${ad_id}, AdGroup: ${adgroup_id}, Page: ${page_id}`;
+                
+                if (extraFields.length > 0) {
+                  comment += ` | Additional Fields: ${extraFields.join(', ')}`;
+                }
+
                 // Prepare lead data
                 const leadData = {
                   name: name || '',
                   email: email || '',
                   contactNumber: phone_number,
                   sourceId: leadSource._id,
-                  comment: `Meta Ads Lead - Lead ID: ${leadgen_id}, Form: ${form_id}, Ad: ${ad_id}, AdGroup: ${adgroup_id}, Page: ${page_id}`
+                  comment: comment
                 };
 
                 // Assign to presales agent and set status
@@ -2363,6 +2397,26 @@ router.post('/webhook/meta-ads', async (req, res) => {
   } catch (error) {
     console.error('Meta Ads webhook error:', error);
     res.status(200).json({});
+  }
+});
+
+// Test API to manually trigger Meta token refresh
+router.post('/test/refresh-token', async (req, res) => {
+  try {
+    console.log('Manual token refresh triggered via API');
+    await refreshMetaToken();
+    const currentToken = await getCurrentToken();
+    res.json({ 
+      message: 'Token refresh completed successfully',
+      tokenExists: !!currentToken,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Manual token refresh failed:', error);
+    res.status(500).json({ 
+      error: 'Token refresh failed', 
+      details: error.message 
+    });
   }
 });
 

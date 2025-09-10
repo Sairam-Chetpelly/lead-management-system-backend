@@ -17,6 +17,7 @@ const projectHouseTypeRoutes = require('./routes/projectAndHouseTypes');
 const leadRoutes = require('./routes/leads');
 const dashboardRoutes = require('./routes/dashboard');
 const metaRoutes = require('./routes/meta');
+const { startTokenScheduler } = require('./utils/tokenScheduler');
 
 const app = express();
 
@@ -66,7 +67,11 @@ app.use('/api', (req, res, next) => {
 
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('MongoDB connected'))
+  .then(() => {
+    console.log('MongoDB connected');
+    // Start token scheduler after DB connection
+    startTokenScheduler();
+  })
   .catch(err => console.error('MongoDB connection error:', err));
 
 // Routes
