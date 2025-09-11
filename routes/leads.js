@@ -5,6 +5,7 @@ const csv = require('csv-parser');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const nodemailer = require('nodemailer');
 const Lead = require('../models/Lead');
 const LeadActivity = require('../models/LeadActivity');
 const User = require('../models/User');
@@ -19,6 +20,35 @@ const ActivityLog = require('../models/ActivityLog');
 const GoogleAdsHistory = require('../models/GoogleAdsHistory');
 const { authenticateToken } = require('../middleware/auth');
 const { refreshMetaToken, getCurrentToken } = require('../utils/metaTokenRefresh');
+
+// Email configuration
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
+
+// Send error notification email
+async function sendErrorEmail(subject, message, errorDetails) {
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: 'sairamchettpelli@gmail.com,crm@reminiscent.in,amit@reminiscent.in',
+      subject: subject,
+      html: `
+        <h3>${subject}</h3>
+        <p>${message}</p>
+        <h4>Error Details:</h4>
+        <pre>${JSON.stringify(errorDetails, null, 2)}</pre>
+        <p><strong>Time:</strong> ${new Date().toISOString()}</p>
+      `
+    });
+  } catch (emailError) {
+    console.error('Failed to send error email:', emailError);
+  }
+}
 
 const router = express.Router();
 
@@ -2213,6 +2243,17 @@ router.post('/webhook/google-ads', async (req, res) => {
   } catch (error) {
     console.error('Google Ads webhook error:', error);
 
+    // Send error notification email
+    await sendErrorEmail(
+      'Google Ads Lead Creation Failed',
+      'Failed to create lead from Google Ads webhook',
+      {
+        error: error.message,
+        requestBody: req.body,
+        stack: error.stack
+      }
+    );
+
     // Update history with error if it exists
     if (req.body.lead_id) {
       try {
@@ -2406,6 +2447,20 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
               } catch (graphError) {
                 console.error('Error fetching lead from Graph API:', graphError.response?.data || graphError.message);
+                
+                // Send error notification email for Meta lead creation failure
+                await sendErrorEmail(
+                  `${platform === 'instagram' ? 'Instagram' : 'Facebook'} Lead Creation Failed`,
+                  'Failed to create lead from Meta Ads webhook',
+                  {
+                    platform,
+                    leadgen_id,
+                    form_id,
+                    ad_id,
+                    error: graphError.response?.data || graphError.message,
+                    stack: graphError.stack
+                  }
+                );
               }
             }
           }
@@ -2417,6 +2472,18 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
   } catch (error) {
     console.error('Meta Ads webhook error:', error);
+    
+    // Send error notification email for general Meta webhook errors
+    await sendErrorEmail(
+      'Meta Ads Webhook Error',
+      'General error in Meta Ads webhook processing',
+      {
+        error: error.message,
+        requestBody: req.body,
+        stack: error.stack
+      }
+    );
+    
     res.status(200).json({});
   }
 });
