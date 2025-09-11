@@ -37,7 +37,7 @@ async function sendErrorEmail(subject, message, errorDetails) {
   try {
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
-      to: 'sairamchettpelli@gmail.com,crm@reminiscent.in,amit@reminiscent.in',
+      to: 'sairamchettpelli@gmail.com,crm@reminiscent.in,amit@reminiscent.in,mace@reminiscent.in,abhijeet@reminiscent.in',
       subject: subject,
       html: `
         <h3>${subject}</h3>
