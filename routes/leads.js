@@ -2266,6 +2266,26 @@ router.post('/webhook/meta-ads', async (req, res) => {
               console.log("Page ID:", page_id);
               console.log("Created Time:", created_time);
 
+              // Detect platform (Facebook vs Instagram)
+              let platform = 'facebook';
+              try {
+                const adResponse = await axios.get(
+                  `https://graph.facebook.com/v23.0/${ad_id}`,
+                  {
+                    params: {
+                      access_token: await getCurrentToken(),
+                      fields: 'creative{object_story_spec}'
+                    }
+                  }
+                );
+                
+                if (adResponse.data.creative?.object_story_spec?.instagram_user_id) {
+                  platform = 'instagram';
+                }
+              } catch (adError) {
+                console.log('Could not detect platform, defaulting to facebook:', adError.message);
+              }
+
               // Fetch lead details from Graph API
               try {
                 let graphResponse;
@@ -2329,13 +2349,14 @@ router.post('/webhook/meta-ads', async (req, res) => {
                   continue;
                 }
 
-                // Get or create Meta lead source
-                let leadSource = await LeadSource.findOne({ slug: 'facebook' });
+                // Get or create platform-specific lead source
+                const sourceSlug = platform;
+                let leadSource = await LeadSource.findOne({ slug: sourceSlug });
                 if (!leadSource) {
                   leadSource = new LeadSource({
-                    name: 'Facebook',
-                    slug: 'facebook',
-                    description: 'Leads from Meta Ads campaigns'
+                    name: platform === 'instagram' ? 'Instagram' : 'Facebook',
+                    slug: sourceSlug,
+                    description: `Leads from ${platform === 'instagram' ? 'Instagram' : 'Facebook'} Ads campaigns`
                   });
                   await leadSource.save();
                 }
@@ -2346,8 +2367,8 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 // Get next presales agent
                 const presalesAgent = await getNextPresalesAgent();
 
-                // Prepare comment with ignored fields
-                let comment = `Meta Ads Lead - Lead ID: ${leadgen_id}, Form: ${form_id}, Ad: ${ad_id}, AdGroup: ${adgroup_id}, Page: ${page_id}`;
+                // Prepare comment with platform and ignored fields
+                let comment = `${platform === 'instagram' ? 'Instagram' : 'Facebook'} Ads Lead - Lead ID: ${leadgen_id}, Form: ${form_id}, Ad: ${ad_id}, AdGroup: ${adgroup_id}, Page: ${page_id}`;
                 
                 if (extraFields.length > 0) {
                   comment += ` | Additional Fields: ${extraFields.join(', ')}`;
