@@ -944,7 +944,7 @@ router.get('/', authenticateToken, async (req, res) => {
       }
     } else if (userRole === 'hod_sales') {
       // HOD sales can only see leads from their center
-      filter.centreId = user.centreId;
+      //filter.centreId = user.centreId;
     } else if (userRole === 'sales_manager') {
       // Sales manager can only see qualified leads from their center
       filter.centreId = user.centreId;
