@@ -261,22 +261,22 @@ router.put('/:id', authenticateToken, async (req, res) => {
       delete updateData.centreId;
     }
     
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true }
-    )
-    .populate('roleId')
-    .populate('statusId')
-    .populate('centreId')
-    .populate('languageIds')
-    .select('-password');
-    
+    const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    res.json(user);
+    Object.assign(user, updateData);
+    await user.save();
+    
+    const updatedUser = await User.findById(user._id)
+      .populate('roleId')
+      .populate('statusId')
+      .populate('centreId')
+      .populate('languageIds')
+      .select('-password');
+    
+    res.json(updatedUser);
   } catch (error) {
     res.status(400).json({ error: error.message });
   }

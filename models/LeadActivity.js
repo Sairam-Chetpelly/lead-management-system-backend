@@ -93,11 +93,19 @@ const leadActivitySchema = new mongoose.Schema({
     type: Date,
     required: false
   },
+  siteVisitCompletedDate: {
+    type: Date,
+    required: false
+  },
   centerVisit: {
     type: Boolean,
     required: false
   },
   centerVisitDate: {
+    type: Date,
+    required: false
+  },
+  centerVisitCompletedDate: {
     type: Date,
     required: false
   },
@@ -109,12 +117,16 @@ const leadActivitySchema = new mongoose.Schema({
     type: Date,
     required: false
   },
-  meetingArrangedDate: {
+  virtualMeetingCompletedDate: {
     type: Date,
     required: false
   },
+  meetingArrangedDate: {
+    type: String,
+    required: false
+  },
   cifDate: {
-    type: Date,
+    type: String,
     required: false
   },
   leadWonDate: {

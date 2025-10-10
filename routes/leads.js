@@ -487,11 +487,12 @@ router.post('/bulk-upload-sales', csvUpload.single('file'), async (req, res) => 
           createdAt: generationDate
         };
 
-        // Set substatus date
+        // Set substatus date with IST timezone
         if (subStatus) {
-          if (subStatus.slug === 'hot') leadData.hotDate = qualifiedDate;
-          else if (subStatus.slug === 'warm') leadData.warmDate = qualifiedDate;
-          else if (subStatus.slug === 'cif') leadData.cifDate = qualifiedDate;
+          const istDate = new Date(qualifiedDate.getTime() + (5.5 * 60 * 60 * 1000));
+          if (subStatus.slug === 'hot') leadData.hotDate = istDate;
+          else if (subStatus.slug === 'warm') leadData.warmDate = istDate;
+          else if (subStatus.slug === 'cif') leadData.cifDate = istDate;
         }
 
         // Create lead
@@ -1108,8 +1109,37 @@ router.get('/', authenticateToken, async (req, res) => {
       Lead.countDocuments(filter)
     ]);
 
+    // Add activity counts to leads
+    const leadsWithActivity = await Promise.all(
+      leads.map(async (lead) => {
+        const [callLogCount, activityLogCount] = await Promise.all([
+          CallLog.countDocuments({ leadId: lead._id, deletedAt: null }),
+          ActivityLog.countDocuments({ leadId: lead._id, deletedAt: null })
+        ]);
+        
+        // Check if sales agent has made any activity when assigned to sales
+        let salesActivity = false;
+        if (lead.salesUserId) {
+          const [salesCallLogs, salesActivityLogs, salesLeadActivities] = await Promise.all([
+            CallLog.countDocuments({ leadId: lead._id, userId: lead.salesUserId, deletedAt: null }),
+            ActivityLog.countDocuments({ leadId: lead._id, userId: lead.salesUserId, deletedAt: null }),
+            LeadActivity.countDocuments({ leadId: lead._id, updatedPerson: lead.salesUserId, deletedAt: null })
+          ]);
+          salesActivity = salesCallLogs > 0 || salesActivityLogs > 0 || salesLeadActivities > 0;
+        }
+        
+        return {
+          ...lead.toObject(),
+          callLogCount,
+          activityLogCount,
+          salesActivity,
+          hasActivity: callLogCount > 0 || activityLogCount > 0
+        };
+      })
+    );
+
     res.json({
-      leads,
+      leads: leadsWithActivity,
       pagination: {
         current: page,
         limit,
@@ -1309,10 +1339,13 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Expected Possession Date': lead.expectedPossessionDate ? new Date(lead.expectedPossessionDate).toLocaleDateString() : '',
       'Site Visit': lead.siteVisit ? 'Yes' : 'No',
       'Site Visit Date': lead.siteVisitDate ? new Date(lead.siteVisitDate).toLocaleDateString() : '',
+      'Site Visit Completed Date': lead.siteVisitCompletedDate ? new Date(lead.siteVisitCompletedDate).toLocaleDateString() : '',
       'Center Visit': lead.centerVisit ? 'Yes' : 'No',
       'Center Visit Date': lead.centerVisitDate ? new Date(lead.centerVisitDate).toLocaleDateString() : '',
+      'Center Visit Completed Date': lead.centerVisitCompletedDate ? new Date(lead.centerVisitCompletedDate).toLocaleDateString() : '',
       'Virtual Meeting': lead.virtualMeeting ? 'Yes' : 'No',
       'Virtual Meeting Date': lead.virtualMeetingDate ? new Date(lead.virtualMeetingDate).toLocaleDateString() : '',
+      'Virtual Meeting Completed Date': lead.virtualMeetingCompletedDate ? new Date(lead.virtualMeetingCompletedDate).toLocaleDateString() : '',
       'CIF Date': lead.cifDate ? new Date(lead.cifDate).toLocaleDateString() : '',
       'Meeting Arranged Date': lead.meetingArrangedDate ? new Date(lead.meetingArrangedDate).toLocaleDateString() : '',
       'Qualified Date': lead.qualifiedDate ? new Date(lead.qualifiedDate).toLocaleDateString() : '',
@@ -1623,13 +1656,13 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
 
     // Handle date fields
     if (req.body.cifDate !== undefined) {
-      updatedData.cifDate = req.body.cifDate ? new Date(req.body.cifDate) : null;
+      updatedData.cifDate = req.body.cifDate ? req.body.cifDate : null;
     } else {
       updatedData.cifDate = lead.cifDate;
     }
 
     if (req.body.meetingArrangedDate !== undefined) {
-      updatedData.meetingArrangedDate = req.body.meetingArrangedDate ? new Date(req.body.meetingArrangedDate) : null;
+      updatedData.meetingArrangedDate = req.body.meetingArrangedDate ? req.body.meetingArrangedDate : null;
     } else {
       updatedData.meetingArrangedDate = lead.meetingArrangedDate;
     }
@@ -1772,8 +1805,8 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       'presalesUserId', 'salesUserId', 'leadStatusId', 'leadSubStatusId',
       'languageId', 'centreId', 'projectTypeId', 'projectValue', 'apartmentName',
       'houseTypeId', 'expectedPossessionDate', 'leadValue',
-      'siteVisit', 'siteVisitDate', 'centerVisit', 'centerVisitDate',
-      'virtualMeeting', 'virtualMeetingDate', 'meetingArrangedDate', 'comment', 'cifDate'
+      'siteVisit', 'siteVisitDate', 'siteVisitCompletedDate', 'centerVisit', 'centerVisitDate', 'centerVisitCompletedDate',
+      'virtualMeeting', 'virtualMeetingDate', 'virtualMeetingCompletedDate', 'meetingArrangedDate', 'comment', 'cifDate'
     ];
 
     fieldsToUpdate.forEach(field => {
@@ -1786,15 +1819,27 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
 
     // Handle date fields
     if (req.body.cifDate !== undefined) {
-      updatedData.cifDate = req.body.cifDate ? new Date(req.body.cifDate) : null;
+      updatedData.cifDate = req.body.cifDate ? req.body.cifDate : null;
     } else {
       updatedData.cifDate = lead.cifDate;
     }
+    console.log('CIF Date set to:', updatedData.cifDate);
 
     if (req.body.meetingArrangedDate !== undefined) {
-      updatedData.meetingArrangedDate = req.body.meetingArrangedDate ? new Date(req.body.meetingArrangedDate) : null;
+      updatedData.meetingArrangedDate = req.body.meetingArrangedDate ? req.body.meetingArrangedDate : null;
     } else {
       updatedData.meetingArrangedDate = lead.meetingArrangedDate;
+    }
+
+    // Handle completed date fields with IST timezone
+    if (req.body.siteVisitCompletedDate !== undefined) {
+      updatedData.siteVisitCompletedDate = req.body.siteVisitCompletedDate ? new Date(req.body.siteVisitCompletedDate) : null;
+    }
+    if (req.body.centerVisitCompletedDate !== undefined) {
+      updatedData.centerVisitCompletedDate = req.body.centerVisitCompletedDate ? new Date(req.body.centerVisitCompletedDate) : null;
+    }
+    if (req.body.virtualMeetingCompletedDate !== undefined) {
+      updatedData.virtualMeetingCompletedDate = req.body.virtualMeetingCompletedDate ? new Date(req.body.virtualMeetingCompletedDate) : null;
     }
 
     // Handle file uploads

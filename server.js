@@ -4,6 +4,8 @@ const cors = require('cors');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
+process.env.TZ = 'Asia/Kolkata';
+
 
 // Import middleware
 const apiKeyAuth = require('./middleware/apiKeyAuth');

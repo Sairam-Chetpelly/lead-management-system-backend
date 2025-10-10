@@ -99,11 +99,19 @@ const leadSchema = new mongoose.Schema({
     type: Date,
     required: false
   },
+  siteVisitCompletedDate: {
+    type: Date,
+    required: false
+  },
   centerVisit: {
     type: Boolean,
     required: false
   },
   centerVisitDate: {
+    type: Date,
+    required: false
+  },
+  centerVisitCompletedDate: {
     type: Date,
     required: false
   },
@@ -115,12 +123,16 @@ const leadSchema = new mongoose.Schema({
     type: Date,
     required: false
   },
-  meetingArrangedDate: {
+  virtualMeetingCompletedDate: {
     type: Date,
     required: false
   },
+  meetingArrangedDate: {
+    type: String,
+    required: false
+  },
   cifDate: {
-    type: Date,
+    type: String,
     required: false
   },
   leadWonDate: {
@@ -193,10 +205,13 @@ leadSchema.pre('save', async function(next) {
       leadValue: this.leadValue,
       siteVisit: this.siteVisit,
       siteVisitDate: this.siteVisitDate,
+      siteVisitCompletedDate: this.siteVisitCompletedDate,
       centerVisit: this.centerVisit,
       centerVisitDate: this.centerVisitDate,
+      centerVisitCompletedDate: this.centerVisitCompletedDate,
       virtualMeeting: this.virtualMeeting,
       virtualMeetingDate: this.virtualMeetingDate,
+      virtualMeetingCompletedDate: this.virtualMeetingCompletedDate,
       meetingArrangedDate: this.meetingArrangedDate,
       cifDate: this.cifDate,
       leadWonDate: this.leadWonDate,
