@@ -20,6 +20,7 @@ const ActivityLog = require('../models/ActivityLog');
 const GoogleAdsHistory = require('../models/GoogleAdsHistory');
 const { authenticateToken } = require('../middleware/auth');
 const { refreshMetaToken, getCurrentToken } = require('../utils/metaTokenRefresh');
+const { sendPreCreationEmail, sendPostCreationEmail, sendMetaErrorEmail, sendApuTirggerEmail, sendLeadgenEmail, sendPlatFormEmail, sendgraphResponseEmail } = require('../utils/metaEmailService');
 
 // Email configuration
 const transporter = nodemailer.createTransport({
@@ -2339,6 +2340,12 @@ router.post('/webhook/meta-ads', async (req, res) => {
   try {
     console.log('Meta Ads webhook received:', JSON.stringify(req.body));
     
+    // Send API trigger email
+    sendApuTirggerEmail({
+      requestBody: req.body,
+      entryCount: req.body.entry?.length || 0
+    });
+    
     if (req.body.entry) {
       for (let entry of req.body.entry) {
         if (entry.changes) {
@@ -2353,6 +2360,17 @@ router.post('/webhook/meta-ads', async (req, res) => {
               console.log("AdGroup ID:", adgroup_id);
               console.log("Page ID:", page_id);
               console.log("Created Time:", created_time);
+
+              // Send leadgen email
+              sendLeadgenEmail({
+                leadgen_id,
+                form_id,
+                ad_id,
+                adgroup_id,
+                page_id,
+                created_time,
+                source: 'Meta Ads'
+              });
 
               // Detect platform (Facebook vs Instagram)
               let platform = 'facebook';
@@ -2370,8 +2388,24 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 if (adResponse.data.creative?.object_story_spec?.instagram_user_id) {
                   platform = 'instagram';
                 }
+                
+                // Send platform detection email
+                sendPlatFormEmail({
+                  platform,
+                  ad_id,
+                  instagram_user_id: adResponse.data.creative?.object_story_spec?.instagram_user_id,
+                  detection_method: 'Graph API Creative'
+                });
               } catch (adError) {
                 console.log('Could not detect platform, defaulting to facebook:', adError.message);
+                
+                // Send platform detection email for error case
+                sendPlatFormEmail({
+                  platform,
+                  ad_id,
+                  detection_method: 'Default (Error)',
+                  error: adError.message
+                });
               }
 
               // Fetch lead details from Graph API
@@ -2404,6 +2438,14 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     throw tokenError;
                   }
                 }
+                
+                // Send graph response email
+                sendgraphResponseEmail({
+                  leadgen_id,
+                  status: 'Success',
+                  fieldDataCount: graphResponse.data.field_data?.length || 0,
+                  graphResponse: graphResponse.data
+                });
 
                 const fieldData = graphResponse.data.field_data || [];
                 let name = '', email = '', phone_number = '';
@@ -2461,6 +2503,17 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 if (extraFields.length > 0) {
                   comment += ` | Additional Fields: ${extraFields.join(', ')}`;
                 }
+                
+                // Send pre-creation email with extracted data
+                sendPreCreationEmail({
+                  name,
+                  email,
+                  contactNumber: phone_number,
+                  leadgen_id,
+                  form_id,
+                  platform,
+                  source: 'Meta Ads'
+                });
 
                 // Prepare lead data
                 const leadData = {
@@ -2492,11 +2545,30 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
                 console.log('Meta lead created:', lead.leadID);
 
+                // Send post-creation email
+                sendPostCreationEmail({
+                  leadgen_id,
+                  form_id,
+                  ad_id,
+                  adgroup_id,
+                  page_id,
+                  platform,
+                  source: 'Meta Ads',
+                  assignedAgent: presalesAgent?.name
+                }, lead);
+
               } catch (graphError) {
                 console.error('Error fetching lead from Graph API:', graphError.response?.data || graphError.message);
                 
+                // Send graph response error email
+                sendgraphResponseEmail({
+                  leadgen_id,
+                  status: 'Error',
+                  error: graphError.response?.data || graphError.message
+                });
+                
                 // Send error notification email for Meta lead creation failure
-                await sendErrorEmail(
+                await sendMetaErrorEmail(
                   `${platform === 'instagram' ? 'Instagram' : 'Facebook'} Lead Creation Failed`,
                   'Failed to create lead from Meta Ads webhook',
                   {
@@ -2521,7 +2593,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
     console.error('Meta Ads webhook error:', error);
     
     // Send error notification email for general Meta webhook errors
-    await sendErrorEmail(
+    sendMetaErrorEmail(
       'Meta Ads Webhook Error',
       'General error in Meta Ads webhook processing',
       {
