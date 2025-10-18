@@ -1824,7 +1824,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
     } else {
       updatedData.cifDate = lead.cifDate;
     }
-    console.log('CIF Date set to:', updatedData.cifDate);
+
 
     if (req.body.meetingArrangedDate !== undefined) {
       updatedData.meetingArrangedDate = req.body.meetingArrangedDate ? req.body.meetingArrangedDate : null;
@@ -2468,15 +2468,20 @@ router.post('/webhook/meta-ads', async (req, res) => {
                   }
                 });
 
-                // Clean phone number - take last 10 digits only
+                // Clean phone number - handle +91 and take last 10 digits
                 if (phone_number) {
-                  phone_number = phone_number.replace(/[^\d]/g, '').slice(-10);
+                  phone_number = phone_number.replace(/[^\d]/g, '');
+                  if (phone_number.startsWith('91') && phone_number.length === 12) {
+                    phone_number = phone_number.slice(2);
+                  } else {
+                    phone_number = phone_number.slice(-10);
+                  }
                 }
 
-                // Validate phone_number number
+                // Handle missing phone number - create lead anyway
                 if (!phone_number || phone_number.length !== 10) {
-                  console.log('Invalid phone_number number:', phone_number);
-                  continue;
+                  console.log('Invalid or missing phone number:', phone_number, '- creating lead without phone');
+                  phone_number = ''; // Set empty string for leads without phone
                 }
 
                 // Get or create platform-specific lead source
@@ -2493,16 +2498,24 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
                 // Get lead status
                 const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
+                if (!leadStatus) {
+                  console.error('Meta api lead create time,Lead status not found');
+                }
 
                 // Get next presales agent
                 const presalesAgent = await getNextPresalesAgent();
+                if (!presalesAgent) {
+                  console.error('Meta api lead create time, Presales agent not found');
+                }
 
                 // Prepare comment with platform and ignored fields
                 let comment = `${platform === 'instagram' ? 'Instagram' : 'Facebook'} Ads Lead - Lead ID: ${leadgen_id}, Form: ${form_id}, Ad: ${ad_id}, AdGroup: ${adgroup_id}, Page: ${page_id}`;
+                console.log('comment:', comment);
                 
                 if (extraFields.length > 0) {
                   comment += ` | Additional Fields: ${extraFields.join(', ')}`;
                 }
+                console.log('comment Fields:', comment);
                 
                 // Send pre-creation email with extracted data
                 sendPreCreationEmail({
@@ -2519,10 +2532,12 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 const leadData = {
                   name: name || '',
                   email: email || '',
-                  contactNumber: phone_number,
                   sourceId: leadSource._id,
                   comment: comment
                 };
+                if (phone_number && phone_number.length === 10) {
+                  leadData.contactNumber = phone_number;
+                }
 
                 // Assign to presales agent and set status
                 if (presalesAgent) {
@@ -2531,10 +2546,28 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 if (leadStatus) {
                   leadData.leadStatusId = leadStatus._id;
                 }
+                console.log('leadData to be created:', leadData);
 
                 // Create lead
+                try {
                 const lead = new Lead(leadData);
                 await lead.save();
+                } catch (leadError) {
+                  console.error('Error creating lead:', leadError);
+                  await sendMetaErrorEmail(
+                    `${platform === 'instagram' ? 'Instagram' : 'Facebook'} Lead Creation Failed`,
+                    'Failed to create lead from Meta Ads webhook',
+                    {
+                      platform,
+                      leadgen_id,
+                      form_id,
+                      ad_id,
+                      error: leadError.message,
+                      stack: leadError.stack
+                    }
+                  );
+                  continue;
+                }
 
                 // Create initial lead activity snapshot
                 const leadActivity = new LeadActivity({
