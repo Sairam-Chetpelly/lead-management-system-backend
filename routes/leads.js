@@ -2552,6 +2552,15 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 try {
                 const lead = new Lead(leadData);
                 await lead.save();
+                console.log('Lead created:', lead);
+                  // Create initial lead activity snapshot
+                const leadActivity = new LeadActivity({
+                  leadId: lead._id,
+                  ...leadData
+                });
+                await leadActivity.save();
+
+                console.log('Meta lead created:', lead.leadID);
                 } catch (leadError) {
                   console.error('Error creating lead:', leadError);
                   await sendMetaErrorEmail(
@@ -2569,14 +2578,6 @@ router.post('/webhook/meta-ads', async (req, res) => {
                   continue;
                 }
 
-                // Create initial lead activity snapshot
-                const leadActivity = new LeadActivity({
-                  leadId: lead._id,
-                  ...leadData
-                });
-                await leadActivity.save();
-
-                console.log('Meta lead created:', lead.leadID);
 
                 // Send post-creation email
                 sendPostCreationEmail({
