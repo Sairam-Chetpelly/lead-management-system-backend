@@ -2482,6 +2482,8 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 if (!phone_number || phone_number.length !== 10) {
                   console.log('Invalid or missing phone number:', phone_number, '- creating lead without phone');
                   console.log('phone number check', phone_number);
+                  console.log('phone number check',phone_number.length);
+                  console.log('phone number formate',phone_number);
                   phone_number = 5555555555;
                 }
 
