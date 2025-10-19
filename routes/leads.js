@@ -2464,8 +2464,8 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     phone_number = value.replace(/[^\d]/g, '');
                   } else {
                     // Collect all other fields as extra information
-                    extraFields.push(`${field.name}: ${value}`);
                   }
+                  extraFields.push(`${field.name}: ${value}`);
                 });
 
                 // Clean phone number - handle +91 and take last 10 digits
@@ -2481,7 +2481,8 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 // Handle missing phone number - create lead anyway
                 if (!phone_number || phone_number.length !== 10) {
                   console.log('Invalid or missing phone number:', phone_number, '- creating lead without phone');
-                  phone_number = ''; // Set empty string for leads without phone
+                  console.log('phone number check', phone_number);
+                  phone_number = 5555555555;
                 }
 
                 // Get or create platform-specific lead source
@@ -2575,7 +2576,6 @@ router.post('/webhook/meta-ads', async (req, res) => {
                       stack: leadError.stack
                     }
                   );
-                  continue;
                 }
 
 
@@ -2593,13 +2593,6 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
               } catch (graphError) {
                 console.error('Error fetching lead from Graph API:', graphError.response?.data || graphError.message);
-                
-                // Send graph response error email
-                sendgraphResponseEmail({
-                  leadgen_id,
-                  status: 'Error',
-                  error: graphError.response?.data || graphError.message
-                });
                 
                 // Send error notification email for Meta lead creation failure
                 await sendMetaErrorEmail(

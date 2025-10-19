@@ -16,7 +16,7 @@ const leadSchema = new mongoose.Schema({
   },
   contactNumber: {
     type: String,
-    required: true,
+    required: false,
     validate: {
       validator: function(v) {
         return /^\d{10}$/.test(v);
