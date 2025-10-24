@@ -1320,9 +1320,15 @@ router.get('/export', authenticateToken, async (req, res) => {
       ])
       .sort(sortObj);
 
+    // Helper function to clean text for CSV
+    const cleanTextForCSV = (text) => {
+      if (!text) return '';
+      return String(text).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    };
+
     const csvData = leads.map(lead => ({
       'Lead ID': lead.leadID,
-      'Name': lead.name || '',
+      'Name': cleanTextForCSV(lead.name),
       'Email': lead.email || '',
       'Contact Number': lead.contactNumber || '',
       'Source': lead.sourceId?.name || '',
@@ -1335,8 +1341,8 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Language': lead.languageId?.name || '',
       'Project Type': lead.projectTypeId?.name || '',
       'House Type': lead.houseTypeId?.name || '',
-      'Project Value': lead.projectValue || '',
-      'Apartment Name': lead.apartmentName || '',
+      'Project Value': cleanTextForCSV(lead.projectValue),
+      'Apartment Name': cleanTextForCSV(lead.apartmentName),
       'Expected Possession Date': lead.expectedPossessionDate ? new Date(lead.expectedPossessionDate).toLocaleDateString() : '',
       'Site Visit': lead.siteVisit ? 'Yes' : 'No',
       'Site Visit Date': lead.siteVisitDate ? new Date(lead.siteVisitDate).toLocaleDateString() : '',
@@ -1355,7 +1361,9 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Interested Date': lead.interestedDate ? new Date(lead.interestedDate).toLocaleDateString() : '',
       'Won Date': lead.leadWonDate ? new Date(lead.leadWonDate).toLocaleDateString() : '',
       'Lost Date': lead.leadLostDate ? new Date(lead.leadLostDate).toLocaleDateString() : '',
-      'Comment': lead.comment || '',
+      'Comment': cleanTextForCSV(lead.comment),
+      'Ad Name': lead?.adname || '',
+      'Ad Set': lead?.adset || '',
       'Updated By': lead.updatedPerson?.name || '',
       'Created At': new Date(lead.createdAt).toLocaleString(),
       'Updated At': new Date(lead.updatedAt).toLocaleString()
