@@ -1196,15 +1196,15 @@ router.get('/export', authenticateToken, async (req, res) => {
         filter.leadStatusId = qualifiedStatus._id;
       }
     }
-
+    
     // Apply search filters
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, 'i');
       filter.$or = [
-        { name: searchRegex },
-        { leadID: searchRegex },
-        { email: searchRegex },
-        { contactNumber: searchRegex }
+          { name: searchRegex },
+          { leadID: searchRegex },
+          { email: searchRegex },
+          { contactNumber: searchRegex }
       ];
     }
 
@@ -1213,8 +1213,8 @@ router.get('/export', authenticateToken, async (req, res) => {
     if (req.query.centre) filter.centreId = req.query.centre;
     if (req.query.assignedTo) {
       filter.$or = [
-        { presalesUserId: req.query.assignedTo },
-        { salesUserId: req.query.assignedTo }
+          { presalesUserId: req.query.assignedTo },
+          { salesUserId: req.query.assignedTo }
       ];
     }
     if (req.query.leadStatus) filter.leadStatusId = req.query.leadStatus;
@@ -1362,8 +1362,8 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Won Date': lead.leadWonDate ? new Date(lead.leadWonDate).toLocaleDateString() : '',
       'Lost Date': lead.leadLostDate ? new Date(lead.leadLostDate).toLocaleDateString() : '',
       'Comment': cleanTextForCSV(lead.comment),
-      'Ad Name': lead?.adname || '',
-      'Ad Set': lead?.adset || '',
+      'Ad Name': cleanTextForCSV(lead?.adname) || '',
+      'Ad Set': cleanTextForCSV(lead?.adset) || '',
       'Updated By': lead.updatedPerson?.name || '',
       'Created At': new Date(lead.createdAt).toLocaleString(),
       'Updated At': new Date(lead.updatedAt).toLocaleString()
@@ -2380,18 +2380,26 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 source: 'Meta Ads'
               });
 
-              // Detect platform (Facebook vs Instagram)
+              // Detect platform and fetch ad/adset details
               let platform = 'facebook';
+              let adname = '';
+              let adsetName = '';
+              
               try {
+                // Fetch ad details including name and adset
                 const adResponse = await axios.get(
                   `https://graph.facebook.com/v23.0/${ad_id}`,
                   {
                     params: {
                       access_token: await getCurrentToken(),
-                      fields: 'creative{object_story_spec}'
+                      fields: 'name,adset{name},creative{object_story_spec}'
                     }
                   }
                 );
+                
+                // Extract ad name and adset name
+                adname = adResponse.data.name || '';
+                adsetName = adResponse.data.adset?.name || '';
                 
                 if (adResponse.data.creative?.object_story_spec?.instagram_user_id) {
                   platform = 'instagram';
@@ -2401,11 +2409,13 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 sendPlatFormEmail({
                   platform,
                   ad_id,
+                  adname,
+                  adsetName,
                   instagram_user_id: adResponse.data.creative?.object_story_spec?.instagram_user_id,
                   detection_method: 'Graph API Creative'
                 });
               } catch (adError) {
-                console.log('Could not detect platform, defaulting to facebook:', adError.message);
+                console.log('Could not fetch ad details, defaulting to facebook:', adError.message);
                 
                 // Send platform detection email for error case
                 sendPlatFormEmail({
@@ -2544,7 +2554,9 @@ router.post('/webhook/meta-ads', async (req, res) => {
                   name: name || '',
                   email: email || '',
                   sourceId: leadSource._id,
-                  comment: comment
+                  comment: comment,
+                  adname: adname,
+                  adset: adsetName
                 };
                 if (phone_number && phone_number.length === 10) {
                   leadData.contactNumber = phone_number;

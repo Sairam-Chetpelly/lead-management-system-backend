@@ -163,6 +163,14 @@ const leadSchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  adname: {
+    type: String,
+    required: false
+  },
+  adset: {
+    type: String,
+    required: false
+  },
   files: {
     type: mongoose.Schema.Types.Mixed,
     required: false
@@ -221,6 +229,8 @@ leadSchema.pre('save', async function(next) {
       warmDate: this.warmDate,
       interestedDate: this.interestedDate,
       comment: this.comment,
+      adname: this.adname,
+      adset: this.adset,
       files: this.files
     };
     

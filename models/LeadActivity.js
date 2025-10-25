@@ -163,6 +163,14 @@ const leadActivitySchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  adname: {
+    type: String,
+    required: false
+  },
+  adset: {
+    type: String,
+    required: false
+  },
   files: {
     type: mongoose.Schema.Types.Mixed,
     required: false
