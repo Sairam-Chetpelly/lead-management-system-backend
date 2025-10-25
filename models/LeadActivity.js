@@ -171,6 +171,10 @@ const leadActivitySchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  campaign: {
+    type: String,
+    required: false
+  },
   files: {
     type: mongoose.Schema.Types.Mixed,
     required: false

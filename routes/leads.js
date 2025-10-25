@@ -1367,6 +1367,7 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Comment': cleanTextForCSV(lead.comment),
       'Ad Name': cleanTextForCSV(lead?.adname) || '',
       'Ad Set': cleanTextForCSV(lead?.adset) || '',
+      'Ad Campaign': cleanTextForCSV(lead?.campaign) || '',
       'Updated By': lead.updatedPerson?.name || '',
       'Created At': new Date(lead.createdAt).toLocaleString(),
       'Updated At': new Date(lead.updatedAt).toLocaleString()
@@ -2387,6 +2388,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
               let platform = 'facebook';
               let adname = '';
               let adsetName = '';
+              let campaignName = '';
               
               try {
                 // Fetch ad details including name and adset
@@ -2395,7 +2397,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                   {
                     params: {
                       access_token: await getCurrentToken(),
-                      fields: 'name,adset{name},creative{object_story_spec}'
+                      fields: 'name,adset{name},campaign{name},creative{object_story_spec}'
                     }
                   }
                 );
@@ -2403,6 +2405,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 // Extract ad name and adset name
                 adname = adResponse.data.name || '';
                 adsetName = adResponse.data.adset?.name || '';
+                campaignName = adResponse.data?.campaign?.name || '';
                 
                 if (adResponse.data.creative?.object_story_spec?.instagram_user_id) {
                   platform = 'instagram';
@@ -2559,6 +2562,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                   sourceId: leadSource._id,
                   comment: comment,
                   adname: adname,
+                  campaign: campaignName,
                   adset: adsetName
                 };
                 if (phone_number && phone_number.length === 10) {
