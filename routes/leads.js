@@ -214,7 +214,7 @@ router.get('/form/data', async (req, res) => {
 });
 
 // Create lead
-router.post('/', async (req, res) => {
+router.post('/', authenticateToken, async (req, res) => {
   try {
     const {
       name,
@@ -256,6 +256,7 @@ router.post('/', async (req, res) => {
       email,
       contactNumber,
       sourceId: leadSource._id,
+      updatedPerson: req?.user?.userId,
       comment
     };
 
@@ -331,7 +332,7 @@ router.post('/', async (req, res) => {
 });
 
 // Bulk upload sales leads
-router.post('/bulk-upload-sales', csvUpload.single('file'), async (req, res) => {
+router.post('/bulk-upload-sales', authenticateToken, csvUpload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -485,6 +486,7 @@ router.post('/bulk-upload-sales', csvUpload.single('file'), async (req, res) => 
           leadValue: value > 6 ? 'high value' : 'low value',
           comment,
           qualifiedDate,
+          updatedPerson: req?.user?.userId,
           createdAt: generationDate
         };
 
@@ -588,7 +590,7 @@ router.post('/bulk-upload-sales', csvUpload.single('file'), async (req, res) => 
 });
 
 // Bulk upload leads
-router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
+router.post('/bulk-upload', authenticateToken, csvUpload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -778,6 +780,7 @@ router.post('/bulk-upload', csvUpload.single('file'), async (req, res) => {
           email: email,
           contactNumber: contactNumber,
           comment: comment,
+          updatedPerson: req?.user?.userId,
           sourceId: matchedLeadSource._id
         };
 
