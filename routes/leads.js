@@ -1009,6 +1009,26 @@ router.get('/', authenticateToken, async (req, res) => {
       filter.virtualMeeting = req.query.virtualMeeting === 'true';
     }
 
+    if (req.query.outOfStation) {
+      filter.outOfStation = req.query.outOfStation === 'true';
+    }
+
+    if (req.query.requirementWithinTwoMonths) {
+      filter.requirementWithinTwoMonths = req.query.requirementWithinTwoMonths === 'true';
+    }
+
+    if (req.query.adname) {
+      filter.adname = new RegExp(req.query.adname, 'i');
+    }
+
+    if (req.query.adset) {
+      filter.adset = new RegExp(req.query.adset, 'i');
+    }
+
+    if (req.query.campaign) {
+      filter.campaign = new RegExp(req.query.campaign, 'i');
+    }
+
     // Date range filters - status-based or creation-based with OR logic for activities
     if (req.query.dateFrom || req.query.dateTo) {
       const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom) : null;
@@ -1225,6 +1245,11 @@ router.get('/export', authenticateToken, async (req, res) => {
     if (req.query.siteVisit) filter.siteVisit = req.query.siteVisit === 'true';
     if (req.query.centerVisit) filter.centerVisit = req.query.centerVisit === 'true';
     if (req.query.virtualMeeting) filter.virtualMeeting = req.query.virtualMeeting === 'true';
+    if (req.query.outOfStation) filter.outOfStation = req.query.outOfStation === 'true';
+    if (req.query.requirementWithinTwoMonths) filter.requirementWithinTwoMonths = req.query.requirementWithinTwoMonths === 'true';
+    if (req.query.adname) filter.adname = new RegExp(req.query.adname, 'i');
+    if (req.query.adset) filter.adset = new RegExp(req.query.adset, 'i');
+    if (req.query.campaign) filter.campaign = new RegExp(req.query.campaign, 'i');
 
     // Date range filters with OR logic for activities
     if (req.query.dateFrom || req.query.dateTo) {
@@ -1365,6 +1390,8 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Won Date': lead.leadWonDate ? new Date(lead.leadWonDate).toLocaleDateString() : '',
       'Lost Date': lead.leadLostDate ? new Date(lead.leadLostDate).toLocaleDateString() : '',
       'Comment': cleanTextForCSV(lead.comment),
+      'Out of Station': lead.outOfStation ? 'Yes' : 'No',
+      'Requirement Within Two Months': lead.requirementWithinTwoMonths ? 'Yes' : 'No',
       'Ad Name': cleanTextForCSV(lead?.adname) || '',
       'Ad Set': cleanTextForCSV(lead?.adset) || '',
       'Ad Campaign': cleanTextForCSV(lead?.campaign) || '',
@@ -1439,9 +1466,9 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
 
     // Check center access for HOD sales
-    if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
-      return res.status(403).json({ error: 'Access denied: Lead not from your center' });
-    }
+    // if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
+    //   return res.status(403).json({ error: 'Access denied: Lead not from your center' });
+    // }
 
     // Check center and qualified status access for sales manager
     if (userRole === 'sales_manager') {
@@ -1788,10 +1815,10 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       return res.status(404).json({ error: 'Lead not found' });
     }
 
-    // Check center access for HOD sales
-    if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
-      return res.status(403).json({ error: 'Access denied: Lead not from your center' });
-    }
+    // // Check center access for HOD sales
+    // if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
+    //   return res.status(403).json({ error: 'Access denied: Lead not from your center' });
+    // }
 
     // Check center and qualified status access for sales manager
     if (userRole === 'sales_manager') {
@@ -1819,7 +1846,8 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       'languageId', 'centreId', 'projectTypeId', 'projectValue', 'apartmentName',
       'houseTypeId', 'expectedPossessionDate', 'leadValue',
       'siteVisit', 'siteVisitDate', 'siteVisitCompletedDate', 'centerVisit', 'centerVisitDate', 'centerVisitCompletedDate',
-      'virtualMeeting', 'virtualMeetingDate', 'virtualMeetingCompletedDate', 'meetingArrangedDate', 'comment', 'cifDate'
+      'virtualMeeting', 'virtualMeetingDate', 'virtualMeetingCompletedDate', 'meetingArrangedDate', 'comment', 'cifDate',
+      'outOfStation', 'requirementWithinTwoMonths'
     ];
 
     fieldsToUpdate.forEach(field => {

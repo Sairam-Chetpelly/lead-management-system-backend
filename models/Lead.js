@@ -163,6 +163,14 @@ const leadSchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  outOfStation: {
+    type: Boolean,
+    required: false
+  },
+  requirementWithinTwoMonths: {
+    type: Boolean,
+    required: false
+  },
   adname: {
     type: String,
     required: false
@@ -233,6 +241,8 @@ leadSchema.pre('save', async function(next) {
       warmDate: this.warmDate,
       interestedDate: this.interestedDate,
       comment: this.comment,
+      outOfStation: this.outOfStation,
+      requirementWithinTwoMonths: this.requirementWithinTwoMonths,
       adname: this.adname,
       adset: this.adset,
       campaign: this.campaign,

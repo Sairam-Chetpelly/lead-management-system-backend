@@ -163,6 +163,14 @@ const leadActivitySchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  outOfStation: {
+    type: Boolean,
+    required: false
+  },
+  requirementWithinTwoMonths: {
+    type: Boolean,
+    required: false
+  },
   adname: {
     type: String,
     required: false

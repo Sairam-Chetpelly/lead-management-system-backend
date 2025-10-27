@@ -146,6 +146,101 @@ router.get('/', authenticateToken, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+router.get('/all', authenticateToken, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = '', role = '', status = '', centre = '' } = req.query;
+    
+    // Get requesting user's role
+    const requestingUser = await User.findById(req.user.userId).populate('roleId');
+    const requestingUserRole = requestingUser?.roleId?.slug;
+    
+    // Build filter query
+    const filter = { deletedAt: null };
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { mobileNumber: { $regex: search, $options: 'i' } },
+        { designation: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (role) {
+      // If role is a slug, find the role by slug first
+      if (typeof role === 'string' && !role.match(/^[0-9a-fA-F]{24}$/)) {
+        const roleDoc = await Role.findOne({ slug: role });
+        if (roleDoc) {
+          filter.roleId = roleDoc._id;
+        }
+      } else {
+        filter.roleId = role;
+      }
+    }
+    if (status) filter.statusId = status;
+    if (centre) filter.centreId = centre;
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .populate('roleId')
+        .populate('statusId')
+        .populate('centreId')
+        .populate('languageIds')
+        .select('-password')
+        .skip(skip)
+        .limit(parseInt(limit))
+        .sort({ createdAt: -1 }),
+      User.countDocuments(filter)
+    ]);
+    
+    // Get lead counts for sales and presales agents
+
+    const usersWithLeadCounts = await Promise.all(
+      users.map(async (user) => {
+        const userObj = user.toObject();
+        
+        // Only get lead counts for sales and presales agents
+        if (['sales_agent', 'presales_agent'].includes(user.roleId.slug)) {
+          // Get latest lead activity for each unique lead assigned to this user
+          const pipeline = [
+            { $match: { deletedAt: null } },
+            { $sort: { createdAt: -1 } },
+            {
+              $match: {
+                $or: [
+                  { presalesUserId: user._id },
+                  { salesUserId: user._id }
+                ]
+              }
+            },
+            { $count: 'total' }
+          ];
+          
+          const result = await Lead.aggregate(pipeline);
+          userObj.leadCount = result.length > 0 ? result[0].total : 0;
+        } else {
+          userObj.leadCount = 0;
+        }
+        
+        return userObj;
+      })
+    );
+    
+    res.json({
+      data: usersWithLeadCounts,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        total,
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Create user (Admin only)
 router.post('/', authenticateToken, [
