@@ -10,11 +10,27 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Handle preflight OPTIONS requests
+router.options('/stats', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-api-key');
+  res.sendStatus(200);
+});
+
 // Get dashboard statistics
 router.get('/stats', authenticateToken, async (req, res) => {
+  // Set CORS headers explicitly
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-api-key');
   try {
+    console.log('Fetching dashboard stats for user:', req.user.userId);
+    const { presalesAgent, dateRange } = req.query;
     const now = new Date();
-    const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     
@@ -22,102 +38,306 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
     
-    // Build base filter for leads based on user role
-    const getLeadFilter = async (additionalFilter = {}) => {
-      let filter = { deletedAt: null, ...additionalFilter };
+    // Fetch all required statuses once
+    const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
+    const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
+    const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
+    const activeStatus = await Status.findOne({ slug: 'active', type: 'status' });
+    
+    // Build base filter for leads based on user role and filters (synchronous now)
+    const getLeadFilter = (additionalFilter = {}) => {
+      let filter = { deletedAt: null };
       
-      if (userRole === 'presales_agent') {
+      // Apply role-specific filters first
+      if (userRole === 'presales_agent' && !presalesAgent) {
         filter.presalesUserId = new mongoose.Types.ObjectId(req.user.userId);
-        const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-        if (leadStatus) {
-          filter.leadStatusId = leadStatus._id;
-        }
       } else if (userRole === 'sales_agent') {
-        const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
-        const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
         filter.salesUserId = new mongoose.Types.ObjectId(req.user.userId);
-        filter.leadStatusId = { 
-          $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean)
-        };
-      } else if (userRole === 'hod_presales' || userRole === 'manager_presales') {
-        const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-        if (leadStatus) {
-          filter.leadStatusId = leadStatus._id;
+        const excludeStatuses = [wonStatus?._id, lostStatus?._id].filter(Boolean);
+        if (excludeStatuses.length > 0) {
+          filter.leadStatusId = { $nin: excludeStatuses };
         }
       } else if (userRole === 'hod_sales') {
-        // HOD sales can only see leads from their center
         filter.centreId = user.centreId;
       } else if (userRole === 'sales_manager') {
-        // Sales manager can only see qualified leads from their center
         filter.centreId = user.centreId;
-        const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
         if (qualifiedStatus) {
           filter.leadStatusId = qualifiedStatus._id;
+        }
+      }
+      // Admin role - no additional filters, can see all data
+      
+      // Apply presales agent filter if provided
+      if (presalesAgent) {
+        filter.presalesUserId = new mongoose.Types.ObjectId(presalesAgent);
+      }
+      
+      // Apply date range filter if provided
+      if (dateRange) {
+        const [startDate, endDate] = dateRange.split(',');
+        if (startDate && endDate) {
+          filter.createdAt = {
+            $gte: new Date(startDate),
+            $lte: new Date(endDate)
+          };
+        }
+      }
+      
+      // Merge additional filter last to allow overrides
+      return { ...filter, ...additionalFilter };
+    };
+    
+    // Presales specific filter - only leads assigned to presales (synchronous)
+    const getPresalesLeadFilter = (additionalFilter = {}) => {
+      let filter = { deletedAt: null, presalesUserId: { $ne: null } };
+      
+      // Apply user filter
+      if (presalesAgent) {
+        filter.presalesUserId = new mongoose.Types.ObjectId(presalesAgent);
+      } else if (userRole === 'presales_agent') {
+        filter.presalesUserId = new mongoose.Types.ObjectId(req.user.userId);
+      }
+      // Admin role - no additional user filter for presales leads
+      
+      // Apply date range filter if provided
+      if (dateRange) {
+        const [startDate, endDate] = dateRange.split(',');
+        if (startDate && endDate) {
+          filter.createdAt = {
+            $gte: new Date(startDate),
+            $lte: new Date(endDate)
+          };
+        }
+      }
+      
+      // Merge additional filter last to allow overrides
+      return { ...filter, ...additionalFilter };
+    };
+    
+    // For presales agents, use presales-specific metrics
+    const isPresalesView = userRole === 'presales_agent' || !!presalesAgent;
+    
+    // Pre-compute presalesLeadIds once for efficiency
+    let presalesLeadIds = [];
+    if (isPresalesView) {
+      const presalesUserId = presalesAgent ? new mongoose.Types.ObjectId(presalesAgent) : new mongoose.Types.ObjectId(req.user.userId);
+      presalesLeadIds = await LeadActivity.find({
+        presalesUserId: presalesUserId
+      }).distinct('leadId');
+    }
+    
+    // Qualified and lost counts
+    let totalQualifiedHistorically = 0, qualifiedMTD = 0, qualifiedToday = 0;
+    let totalLostHistorically = 0, lostMTD = 0, lostToday = 0;
+    
+    if (isPresalesView) {
+      // Historical qualified leads (ever qualified)
+      if (qualifiedStatus && presalesLeadIds.length > 0) {
+        const qualifiedPresalesLeads = await LeadActivity.find({
+          leadId: { $in: presalesLeadIds },
+          leadStatusId: qualifiedStatus._id
+        }).distinct('leadId');
+        totalQualifiedHistorically = qualifiedPresalesLeads.length;
+      }
+      
+      // MTD qualified leads
+      if (qualifiedStatus && presalesLeadIds.length > 0) {
+        const qualifiedMTDLeads = await LeadActivity.find({
+          leadId: { $in: presalesLeadIds },
+          leadStatusId: qualifiedStatus._id,
+          createdAt: { $gte: startOfMonth }
+        }).distinct('leadId');
+        qualifiedMTD = qualifiedMTDLeads.length;
+      }
+      
+      // Today's qualified leads
+      if (qualifiedStatus && presalesLeadIds.length > 0) {
+        const qualifiedTodayLeads = await LeadActivity.find({
+          leadId: { $in: presalesLeadIds },
+          leadStatusId: qualifiedStatus._id,
+          createdAt: { $gte: startOfToday }
+        }).distinct('leadId');
+        qualifiedToday = qualifiedTodayLeads.length;
+      }
+      
+      // Historical lost leads (ever lost)
+      if (lostStatus && presalesLeadIds.length > 0) {
+        const lostPresalesLeads = await LeadActivity.find({
+          leadId: { $in: presalesLeadIds },
+          leadStatusId: lostStatus._id
+        }).distinct('leadId');
+        totalLostHistorically = lostPresalesLeads.length;
+      }
+      
+      // MTD lost leads
+      if (lostStatus && presalesLeadIds.length > 0) {
+        const lostMTDLeads = await LeadActivity.find({
+          leadId: { $in: presalesLeadIds },
+          leadStatusId: lostStatus._id,
+          createdAt: { $gte: startOfMonth }
+        }).distinct('leadId');
+        lostMTD = lostMTDLeads.length;
+      }
+      
+      // Today's lost leads
+      if (lostStatus && presalesLeadIds.length > 0) {
+        const lostTodayLeads = await LeadActivity.find({
+          leadId: { $in: presalesLeadIds },
+          leadStatusId: lostStatus._id,
+          createdAt: { $gte: startOfToday }
+        }).distinct('leadId');
+        lostToday = lostTodayLeads.length;
+      }
+    } else {
+      const qualifiedFilter = qualifiedStatus ? { leadStatusId: qualifiedStatus._id } : {};
+      totalQualifiedHistorically = await Lead.countDocuments(getLeadFilter(qualifiedFilter));
+      
+      // Use qualifiedDate for consistency with daily trends
+      qualifiedMTD = qualifiedStatus ? await Lead.countDocuments(getLeadFilter({ ...qualifiedFilter, qualifiedDate: { $gte: startOfMonth } })) : 0;
+      qualifiedToday = qualifiedStatus ? await Lead.countDocuments(getLeadFilter({ ...qualifiedFilter, qualifiedDate: { $gte: startOfToday } })) : 0;
+      
+      const lostFilter = lostStatus ? { leadStatusId: lostStatus._id } : {};
+      totalLostHistorically = await Lead.countDocuments(getLeadFilter(lostFilter));
+      
+      // Use lostDate for consistency with daily trends
+      lostMTD = lostStatus ? await Lead.countDocuments(getLeadFilter({ ...lostFilter, lostDate: { $gte: startOfMonth } })) : 0;
+      lostToday = lostStatus ? await Lead.countDocuments(getLeadFilter({ ...lostFilter, lostDate: { $gte: startOfToday } })) : 0;
+    }
+    
+    // Total leads historically (assigned to presales)
+    const totalLeadsHistorically = isPresalesView ? 
+      await Lead.countDocuments(getPresalesLeadFilter()) :
+      await Lead.countDocuments(getLeadFilter());
+    
+    // Leads Month to Date (assigned to presales)
+    const leadsMonthToDate = isPresalesView ?
+      await Lead.countDocuments(getPresalesLeadFilter({ createdAt: { $gte: startOfMonth } })) :
+      await Lead.countDocuments(getLeadFilter({ createdAt: { $gte: startOfMonth } }));
+    
+    // Today's leads (assigned to presales)
+    const todayLeads = isPresalesView ?
+      await Lead.countDocuments(getPresalesLeadFilter({ createdAt: { $gte: startOfToday } })) :
+      await Lead.countDocuments(getLeadFilter({ createdAt: { $gte: startOfToday } }));
+    
+    // Call filters
+    const getCallFilter = (additionalFilter = {}) => {
+      let filter = { deletedAt: null, ...additionalFilter };
+      
+      if (presalesAgent) {
+        filter.userId = new mongoose.Types.ObjectId(presalesAgent);
+      } else if (userRole === 'presales_agent' || userRole === 'sales_agent') {
+        filter.userId = new mongoose.Types.ObjectId(req.user.userId);
+      }
+      // Admin role - no user filter, can see all calls
+      
+      if (dateRange) {
+        const [startDate, endDate] = dateRange.split(',');
+        if (startDate && endDate) {
+          filter.createdAt = {
+            $gte: new Date(startDate),
+            $lte: new Date(endDate)
+          };
         }
       }
       
       return filter;
     };
     
-    // Total leads
-    const totalLeads = await Lead.countDocuments(await getLeadFilter());
+    // Total calls historically
+    const totalCallsHistorically = await CallLog.countDocuments(getCallFilter());
     
-    // This week leads
-    const weekLeads = await Lead.countDocuments(await getLeadFilter({ createdAt: { $gte: startOfWeek } }));
+    // Calls MTD
+    const callsMTD = await CallLog.countDocuments(getCallFilter({ createdAt: { $gte: startOfMonth } }));
     
-    // Today's leads
-    const todayLeads = await Lead.countDocuments(await getLeadFilter({ createdAt: { $gte: startOfToday } }));
+    // Today's calls
+    const todayCalls = await CallLog.countDocuments(getCallFilter({ createdAt: { $gte: startOfToday } }));
     
-    // Today's calls (filter by user for presales and sales agents)
-    let callFilter = { deletedAt: null, createdAt: { $gte: startOfToday } };
-    if (userRole === 'presales_agent' || userRole === 'sales_agent') {
-      callFilter.userId = new mongoose.Types.ObjectId(req.user.userId);
-    }
-    const todayCalls = await CallLog.countDocuments(callFilter);
+    // Won and lost leads (filtered by role)
+    const wonLeads = wonStatus ? await Lead.countDocuments(getLeadFilter({ leadStatusId: wonStatus._id })) : 0;
+    const lostLeads = totalLostHistorically;
     
-    // Won leads - don't apply role filters for won/lost counts
-    const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
-    const wonLeads = wonStatus ? await Lead.countDocuments({ deletedAt: null, leadStatusId: wonStatus._id }) : 0;
+    // Daily trends (last 30 days)
+    const dailyLeadTrend = [];
+    const dailyCallTrend = [];
+    const dailyLeadsVsCalls = [];
+    const dailyQualifiedTrend = [];
+    const dailyLostTrend = [];
     
-    // Lost leads - don't apply role filters for won/lost counts
-    const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
-    const lostLeads = lostStatus ? await Lead.countDocuments({ deletedAt: null, leadStatusId: lostStatus._id }) : 0;
-    
-    // Weekly lead trend (last 7 days)
-    const weeklyTrend = [];
-    const weeklyCallTrend = [];
-    for (let i = 6; i >= 0; i--) {
+    for (let i = 29; i >= 0; i--) {
       const date = new Date();
       date.setDate(date.getDate() - i);
       date.setHours(0, 0, 0, 0);
       const nextDate = new Date(date);
       nextDate.setDate(nextDate.getDate() + 1);
       
-      const dayLeadCount = await Lead.countDocuments(await getLeadFilter({
+      const dayLeadCount = isPresalesView ?
+        await Lead.countDocuments(getPresalesLeadFilter({ createdAt: { $gte: date, $lt: nextDate } })) :
+        await Lead.countDocuments(getLeadFilter({ createdAt: { $gte: date, $lt: nextDate } }));
+      
+      const dayCallCount = await CallLog.countDocuments(getCallFilter({
         createdAt: { $gte: date, $lt: nextDate }
       }));
       
-      // Daily call count for presales and sales agents
-      let dayCallFilter = { deletedAt: null, createdAt: { $gte: date, $lt: nextDate } };
-      if (userRole === 'presales_agent' || userRole === 'sales_agent') {
-        dayCallFilter.userId = new mongoose.Types.ObjectId(req.user.userId);
+      // Daily qualified and lost leads count
+      let dayQualifiedCount = 0;
+      let dayLostCount = 0;
+      if (isPresalesView) {
+        if (presalesLeadIds.length > 0 && qualifiedStatus) {
+          const dayQualifiedLeads = await LeadActivity.find({
+            leadId: { $in: presalesLeadIds },
+            leadStatusId: qualifiedStatus._id,
+            createdAt: { $gte: date, $lt: nextDate }
+          }).distinct('leadId');
+          dayQualifiedCount = dayQualifiedLeads.length;
+        }
+        if (presalesLeadIds.length > 0 && lostStatus) {
+          const dayLostLeads = await LeadActivity.find({
+            leadId: { $in: presalesLeadIds },
+            leadStatusId: lostStatus._id,
+            createdAt: { $gte: date, $lt: nextDate }
+          }).distinct('leadId');
+          dayLostCount = dayLostLeads.length;
+        }
+      } else {
+        if (qualifiedStatus) {
+          dayQualifiedCount = await Lead.countDocuments(getLeadFilter({ leadStatusId: qualifiedStatus._id, qualifiedDate: { $gte: date, $lt: nextDate } }));
+        }
+        if (lostStatus) {
+          dayLostCount = await Lead.countDocuments(getLeadFilter({ leadStatusId: lostStatus._id, lostDate: { $gte: date, $lt: nextDate } }));
+        }
       }
-      const dayCallCount = await CallLog.countDocuments(dayCallFilter);
       
-      weeklyTrend.push({
-        date: date.toISOString().split('T')[0],
+      const isoDate = date.toISOString().split('T')[0];
+      dailyLeadTrend.push({
+        date: isoDate,
         count: dayLeadCount
       });
       
-      weeklyCallTrend.push({
-        date: date.toISOString().split('T')[0],
+      dailyCallTrend.push({
+        date: isoDate,
         count: dayCallCount
+      });
+      
+      dailyQualifiedTrend.push({
+        date: isoDate,
+        count: dayQualifiedCount
+      });
+      
+      dailyLostTrend.push({
+        date: isoDate,
+        count: dayLostCount
+      });
+      
+      dailyLeadsVsCalls.push({
+        date: isoDate,
+        leads: dayLeadCount,
+        calls: dayCallCount
       });
     }
     
     // Status distribution
     const statusPipeline = [
-      { $match: await getLeadFilter() },
+      { $match: getLeadFilter() },
       { $group: { _id: '$leadStatusId', count: { $sum: 1 } } },
       {
         $lookup: {
@@ -147,7 +367,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
     
     // Lead value distribution
     const valuePipeline = [
-      { $match: await getLeadFilter() },
+      { $match: getLeadFilter() },
       { $group: { _id: '$leadValue', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ];
@@ -158,9 +378,66 @@ router.get('/stats', authenticateToken, async (req, res) => {
       count: item.count
     }));
     
-    // Source-wise lead distribution
+    // Source-wise qualified lead distribution
+    const qualifiedFilter = qualifiedStatus ? { leadStatusId: qualifiedStatus._id } : {};
+    const sourceQualifiedPipeline = [
+      { $match: getLeadFilter(qualifiedFilter) },
+      {
+        $lookup: {
+          from: 'leadsources',
+          localField: 'sourceId',
+          foreignField: '_id',
+          as: 'source'
+        }
+      },
+      {
+        $addFields: {
+          sourceName: {
+            $cond: {
+              if: { $gt: [{ $size: '$source' }, 0] },
+              then: { $arrayElemAt: ['$source.name', 0] },
+              else: 'Unknown Source'
+            }
+          }
+        }
+      },
+      { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ];
+    
+    const sourceQualifiedDistribution = await Lead.aggregate(sourceQualifiedPipeline);
+    
+    // Source-wise won lead distribution (filtered)
+    const sourceWonPipeline = [
+      { $match: getLeadFilter({ leadStatusId: wonStatus?._id }) },
+      {
+        $lookup: {
+          from: 'leadsources',
+          localField: 'sourceId',
+          foreignField: '_id',
+          as: 'source'
+        }
+      },
+      {
+        $addFields: {
+          sourceName: {
+            $cond: {
+              if: { $gt: [{ $size: '$source' }, 0] },
+              then: { $arrayElemAt: ['$source.name', 0] },
+              else: 'Unknown Source'
+            }
+          }
+        }
+      },
+      { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ];
+    
+    const sourceWonDistribution = await Lead.aggregate(sourceWonPipeline);
+    
+    // Source-wise lead distribution (all leads)
     const sourcePipeline = [
-      { $match: await getLeadFilter() },
+      { $match: getLeadFilter() },
       {
         $lookup: {
           from: 'leadsources',
@@ -188,7 +465,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
     
     // Center-wise distribution
     const centerPipeline = [
-      { $match: await getLeadFilter() },
+      { $match: getLeadFilter() },
       {
         $lookup: {
           from: 'centres',
@@ -216,7 +493,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
     
     // Language-wise distribution
     const languagePipeline = [
-      { $match: await getLeadFilter() },
+      { $match: getLeadFilter() },
       {
         $lookup: {
           from: 'languages',
@@ -244,15 +521,19 @@ router.get('/stats', authenticateToken, async (req, res) => {
     
     // Lead sub-status distribution for sales users and admin
     let leadSubStatusDistribution = [];
-    if (userRole === 'sales_agent' || userRole === 'admin' || userRole === 'hod_sales' || userRole === 'manager_sales') {
+    if (userRole === 'sales_agent' || userRole === 'admin' || userRole === 'hod_sales' || userRole === 'sales_manager') {
       let subStatusFilter = { deletedAt: null };
       
       if (userRole === 'sales_agent') {
-        const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
-        const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
         subStatusFilter.salesUserId = new mongoose.Types.ObjectId(req.user.userId);
-        subStatusFilter.leadStatusId = { $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean) };
+        const excludeStatuses = [wonStatus?._id, lostStatus?._id].filter(Boolean);
+        if (excludeStatuses.length > 0) {
+          subStatusFilter.leadStatusId = { $nin: excludeStatuses };
+        }
+      } else if (userRole === 'hod_sales' || userRole === 'sales_manager') {
+        subStatusFilter.centreId = user.centreId;
       }
+      // Admin sees all
       
       const subStatusPipeline = [
         { $match: subStatusFilter },
@@ -299,7 +580,6 @@ router.get('/stats', authenticateToken, async (req, res) => {
         roleId: { $in: presalesRoleIds }
       });
       
-      const activeStatus = await Status.findOne({ slug: 'active', type: 'status' });
       activeUsers = activeStatus ? await User.countDocuments({ 
         deletedAt: null,
         roleId: { $in: presalesRoleIds },
@@ -312,7 +592,6 @@ router.get('/stats', authenticateToken, async (req, res) => {
         centreId: user.centreId
       });
       
-      const activeStatus = await Status.findOne({ slug: 'active', type: 'status' });
       activeUsers = activeStatus ? await User.countDocuments({ 
         deletedAt: null,
         centreId: user.centreId,
@@ -321,25 +600,60 @@ router.get('/stats', authenticateToken, async (req, res) => {
     } else {
       // Show all users for other roles
       totalUsers = await User.countDocuments({ deletedAt: null });
-      const activeStatus = await Status.findOne({ slug: 'active', type: 'status' });
       activeUsers = activeStatus ? await User.countDocuments({ 
         deletedAt: null,
         statusId: activeStatus._id
       }) : 0;
     }
     
+    // Calculate MQL percentage (for presales: qualified/allocated)
+    const mqlPercentage = totalLeadsHistorically > 0 ? ((totalQualifiedHistorically / totalLeadsHistorically) * 100).toFixed(2) : 0;
+    
+    // Daily MQL percentage for presales
+    const dailyMqlPercentage = todayLeads > 0 ? ((qualifiedToday / todayLeads) * 100).toFixed(2) : 0;
+    
     res.json({
-      totalLeads,
-      weekLeads,
+      // Numbers at top
+      totalLeadsHistorically,
+      leadsMonthToDate,
       todayLeads,
+      totalCallsHistorically,
+      callsMTD,
       todayCalls,
+      totalQualifiedHistorically,
+      qualifiedMTD,
+      qualifiedToday,
+      
+      // Legacy fields for compatibility
+      totalLeads: totalLeadsHistorically,
+      weekLeads: leadsMonthToDate,
       wonLeads,
       lostLeads,
-      weeklyTrend,
-      weeklyCallTrend,
+      
+      // Trends
+      dailyLeadTrend,
+      dailyCallTrend,
+      weeklyTrend: dailyLeadTrend, // For backward compatibility
+      weeklyCallTrend: dailyCallTrend,
+      
+      // MQL percentage
+      mqlPercentage,
+      dailyMqlPercentage,
+      dailyLeadsVsCalls,
+      dailyQualifiedTrend,
+      dailyLostTrend,
+      
+      // Lost leads (now included for all views)
+      totalLostHistorically,
+      lostMTD,
+      lostToday,
+      
+      // Charts data
       statusDistribution,
       leadValueDistribution,
       sourceDistribution,
+      sourceQualifiedDistribution,
+      sourceWonDistribution,
       centerDistribution,
       languageDistribution,
       leadSubStatusDistribution,
@@ -350,6 +664,26 @@ router.get('/stats', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error fetching dashboard stats:', error);
     res.status(500).json({ error: 'Failed to fetch dashboard statistics' });
+  }
+});
+
+// Get presales agents for filter dropdown
+router.get('/presales-agents', authenticateToken, async (req, res) => {
+  try {
+    const presalesRole = await Role.findOne({ slug: 'presales_agent' });
+    if (!presalesRole) {
+      return res.json([]);
+    }
+    
+    const presalesAgents = await User.find({
+      roleId: presalesRole._id,
+      deletedAt: null
+    }).select('name _id');
+    
+    res.json(presalesAgents);
+  } catch (error) {
+    console.error('Error fetching presales agents:', error);
+    res.status(500).json({ error: 'Failed to fetch presales agents' });
   }
 });
 
