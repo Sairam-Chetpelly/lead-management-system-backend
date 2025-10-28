@@ -185,6 +185,27 @@ router.get('/unsigned', authenticateToken, async (req, res) => {
   }
 });
 
+// Get ad field values
+router.get('/ad-values/:field', authenticateToken, async (req, res) => {
+  try {
+    const { field } = req.params;
+    
+    if (!['adname', 'adset', 'campaign'].includes(field)) {
+      return res.status(400).json({ error: 'Invalid field' });
+    }
+
+    const values = await Lead.distinct(field, {
+      [field]: { $ne: null, $ne: '' },
+      deletedAt: null
+    });
+
+    res.json(values.filter(v => v && v.trim().length > 0));
+  } catch (error) {
+    console.error('Error fetching ad values:', error);
+    res.status(500).json({ error: 'Failed to fetch ad values' });
+  }
+});
+
 // Get dropdown data for form (must be before parameterized routes)
 router.get('/form/data', async (req, res) => {
   try {
