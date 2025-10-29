@@ -200,8 +200,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
       totalLostHistorically = await Lead.countDocuments(getLeadFilter(lostFilter));
       
       // Use lostDate for consistency with daily trends
-      lostMTD = lostStatus ? await Lead.countDocuments(getLeadFilter({ ...lostFilter, lostDate: { $gte: startOfMonth } })) : 0;
-      lostToday = lostStatus ? await Lead.countDocuments(getLeadFilter({ ...lostFilter, lostDate: { $gte: startOfToday } })) : 0;
+      lostMTD = lostStatus ? await Lead.countDocuments(getLeadFilter({ ...lostFilter, leadLostDate: { $gte: startOfMonth } })) : 0;
+      lostToday = lostStatus ? await Lead.countDocuments(getLeadFilter({ ...lostFilter, leadLostDate: { $gte: startOfToday } })) : 0;
     }
     
     // Total leads historically (assigned to presales)
@@ -303,7 +303,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
           dayQualifiedCount = await Lead.countDocuments(getLeadFilter({ leadStatusId: qualifiedStatus._id, qualifiedDate: { $gte: date, $lt: nextDate } }));
         }
         if (lostStatus) {
-          dayLostCount = await Lead.countDocuments(getLeadFilter({ leadStatusId: lostStatus._id, lostDate: { $gte: date, $lt: nextDate } }));
+          dayLostCount = await Lead.countDocuments(getLeadFilter({ leadStatusId: lostStatus._id, leadLostDate: { $gte: date, $lt: nextDate } }));
         }
       }
       
@@ -684,6 +684,378 @@ router.get('/presales-agents', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error fetching presales agents:', error);
     res.status(500).json({ error: 'Failed to fetch presales agents' });
+  }
+});
+
+// Sales dashboard
+router.get('/sales', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+    
+    if (!['sales_agent', 'hod_sales', 'sales_manager'].includes(userRole)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const filter = { deletedAt: null };
+    if (userRole === 'sales_agent') {
+      filter.salesUserId = req.user.userId;
+    } else if (['hod_sales', 'sales_manager'].includes(userRole)) {
+      filter.centreId = user.centreId;
+    }
+
+    const [wonStatus, lostStatus] = await Promise.all([
+      Status.findOne({ slug: 'won', type: 'leadStatus' }),
+      Status.findOne({ slug: 'lost', type: 'leadStatus' })
+    ]);
+
+    const [myLeads, won, lost, calls] = await Promise.all([
+      Lead.countDocuments(filter),
+      Lead.countDocuments({ ...filter, leadStatusId: wonStatus?._id }),
+      Lead.countDocuments({ ...filter, leadStatusId: lostStatus?._id }),
+      CallLog.countDocuments({ userId: req.user.userId, deletedAt: null })
+    ]);
+
+    res.json({ myLeads, won, lost, calls, role: 'sales' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch sales dashboard' });
+  }
+});
+
+// Admin dashboard
+router.get('/admin', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    if (user?.roleId?.slug !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const { userType, agentId, startDate, endDate, sourceId } = req.query;
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    // Build filters
+    const leadFilter = { deletedAt: null };
+    const callFilter = { deletedAt: null };
+
+    // Apply agent filter
+    if (agentId && agentId !== 'all') {
+      if (userType === 'sales') {
+        leadFilter.salesUserId = agentId;
+      } else if (userType === 'presales') {
+        leadFilter.presalesUserId = agentId;
+      } else {
+        leadFilter.$or = [{ salesUserId: agentId }, { presalesUserId: agentId }];
+      }
+      callFilter.userId = agentId;
+    }
+
+    // Apply source filter
+    if (sourceId && sourceId !== 'all') {
+      leadFilter.sourceId = sourceId;
+    }
+
+    // Apply date filter
+    const dateFilter = {};
+    if (startDate && endDate) {
+      dateFilter.$gte = new Date(startDate);
+      dateFilter.$lte = new Date(endDate);
+    }
+
+    const [qualifiedStatus, lostStatus, wonStatus] = await Promise.all([
+      Status.findOne({ slug: 'qualified', type: 'leadStatus' }),
+      Status.findOne({ slug: 'lost', type: 'leadStatus' }),
+      Status.findOne({ slug: 'won', type: 'leadStatus' })
+    ]);
+
+    // Get counts with filters applied
+    const getLeadFilter = (additional = {}) => ({ ...leadFilter, ...additional });
+    const getCallFilter = (additional = {}) => ({ ...callFilter, ...additional });
+
+    // Build date filters similar to leads API
+    let createdAtFilter = {};
+    if (startDate && endDate) {
+      createdAtFilter = {
+        $gte: new Date(startDate),
+        $lte: (() => {
+          const toDate = new Date(endDate);
+          toDate.setHours(23, 59, 59, 999);
+          return toDate;
+        })()
+      };
+    }
+
+    // Use date filters for MTD if dates provided, otherwise use current month
+    const mtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
+    const qualifiedMtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
+    const lostMtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
+    const wonMtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
+
+    const [totalLeads, leadsMTD, leadsToday, totalCalls, callsMTD, callsToday,
+           totalQualified, qualifiedMTD, qualifiedToday, totalLost, lostMTD, lostToday,
+           totalWon, wonMTD, wonToday] = await Promise.all([
+      // Total leads
+      Lead.countDocuments(getLeadFilter(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {})),
+      Lead.countDocuments(getLeadFilter({ createdAt: mtdFilter })),
+      Lead.countDocuments(getLeadFilter({ createdAt: { $gte: startOfToday } })),
+      // Total calls
+      CallLog.countDocuments(getCallFilter(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {})),
+      CallLog.countDocuments(getCallFilter({ createdAt: mtdFilter })),
+      CallLog.countDocuments(getCallFilter({ createdAt: { $gte: startOfToday } })),
+      // Qualified leads
+      Lead.countDocuments(getLeadFilter({ leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) })),
+      Lead.countDocuments(getLeadFilter({ leadStatusId: qualifiedStatus?._id, qualifiedDate: qualifiedMtdFilter })),
+      Lead.countDocuments(getLeadFilter({ leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday } })),
+      // Lost leads
+      Lead.countDocuments(getLeadFilter({ leadStatusId: lostStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) })),
+      Lead.countDocuments(getLeadFilter({ leadStatusId: lostStatus?._id, leadLostDate: lostMtdFilter })),
+      Lead.countDocuments(getLeadFilter({ leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfToday } })),
+      // Won leads
+      Lead.countDocuments(getLeadFilter({ leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) })),
+      Lead.countDocuments(getLeadFilter({ leadStatusId: wonStatus?._id, leadWonDate: wonMtdFilter })),
+      Lead.countDocuments(getLeadFilter({ leadStatusId: wonStatus?._id, leadWonDate: { $gte: startOfToday } }))
+    ]);
+
+    // Daily trends for charts - use date range if provided, otherwise last 30 days
+    const dailyLeads = [];
+    const dailyCalls = [];
+    const dailyQualified = [];
+    const dailyLost = [];
+    const dailyWon = [];
+    
+    let chartStartDate, chartEndDate;
+    if (startDate && endDate) {
+      chartStartDate = new Date(startDate);
+      chartEndDate = new Date(endDate);
+    } else {
+      chartEndDate = new Date();
+      chartStartDate = new Date();
+      chartStartDate.setDate(chartStartDate.getDate() - 29);
+    }
+    
+    const currentDate = new Date(chartStartDate);
+    while (currentDate <= chartEndDate) {
+      const date = new Date(currentDate);
+      date.setHours(0, 0, 0, 0);
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
+      
+      const [dayLeads, dayCalls, dayQualified, dayLost, dayWon] = await Promise.all([
+        Lead.countDocuments(getLeadFilter({ createdAt: { $gte: date, $lt: nextDate } })),
+        CallLog.countDocuments(getCallFilter({ createdAt: { $gte: date, $lt: nextDate } })),
+        Lead.countDocuments(getLeadFilter({ leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: date, $lt: nextDate } })),
+        Lead.countDocuments(getLeadFilter({ leadStatusId: lostStatus?._id, leadLostDate: { $gte: date, $lt: nextDate } })),
+        Lead.countDocuments(getLeadFilter({ leadStatusId: wonStatus?._id, leadWonDate: { $gte: date, $lt: nextDate } }))
+      ]);
+      
+      const dateStr = date.toISOString().split('T')[0];
+      dailyLeads.push({ date: dateStr, count: dayLeads });
+      dailyCalls.push({ date: dateStr, count: dayCalls });
+      dailyQualified.push({ date: dateStr, count: dayQualified });
+      dailyLost.push({ date: dateStr, count: dayLost });
+      dailyWon.push({ date: dateStr, count: dayWon });
+      
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    // Source-wise all leads
+    const sourceLeads = await Lead.aggregate([
+      { $match: getLeadFilter() },
+      { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+      { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+      { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+
+    // Source-wise qualified leads
+    const sourceQualified = await Lead.aggregate([
+      { $match: getLeadFilter({ leadStatusId: qualifiedStatus?._id }) },
+      { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+      { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+      { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+
+    // Source-wise won leads
+    const sourceWon = await Lead.aggregate([
+      { $match: getLeadFilter({ leadStatusId: wonStatus?._id }) },
+      { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+      { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+      { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+
+    res.json({
+      // Card metrics
+      totalLeads, leadsMTD, leadsToday,
+      totalCalls, callsMTD, callsToday,
+      totalQualified, qualifiedMTD, qualifiedToday,
+      totalLost, lostMTD, lostToday,
+      totalWon, wonMTD, wonToday,
+      // Charts data
+      dailyLeads, dailyCalls, dailyQualified, dailyLost, dailyWon,
+      sourceLeads, sourceQualified, sourceWon,
+      role: 'admin'
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch admin dashboard' });
+  }
+});
+
+// Get all sources for admin dashboard dropdown
+router.get('/admin/sources', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    if (user?.roleId?.slug !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const LeadSource = require('../models/LeadSource');
+    const sources = await LeadSource.find({ deletedAt: null }).select('_id name').sort({ name: 1 });
+    res.json(sources);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch sources' });
+  }
+});
+
+// Get users by type for admin dashboard
+router.get('/admin/users/:type', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    if (user?.roleId?.slug !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const { type } = req.params;
+    let roleFilter = {};
+
+    if (type === 'sales') {
+      const salesRoles = await Role.find({ slug: { $in: ['sales_agent', 'hod_sales', 'sales_manager'] } });
+      roleFilter = { roleId: { $in: salesRoles.map(r => r._id) } };
+    } else if (type === 'presales') {
+      const presalesRoles = await Role.find({ slug: { $in: ['presales_agent', 'hod_presales', 'manager_presales'] } });
+      roleFilter = { roleId: { $in: presalesRoles.map(r => r._id) } };
+    }
+    // For 'all' type, no roleFilter is applied
+
+    const users = await User.find({ ...roleFilter, deletedAt: null }).select('_id name email').sort({ name: 1 });
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// Presales dashboard
+router.get('/presales', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+    
+    if (!['presales_agent', 'hod_presales', 'manager_presales'].includes(userRole)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const filter = { deletedAt: null };
+    if (userRole === 'presales_agent') {
+      filter.presalesUserId = req.user.userId;
+    }
+
+    const [leadStatus, qualifiedStatus, lostStatus] = await Promise.all([
+      Status.findOne({ slug: 'lead', type: 'leadStatus' }),
+      Status.findOne({ slug: 'qualified', type: 'leadStatus' }),
+      Status.findOne({ slug: 'lost', type: 'leadStatus' })
+    ]);
+
+    const [totalLeads, leadsToday, leadsMTD, qualified, qualifiedToday, qualifiedMTD, lost, lostToday, lostMTD, calls, callsToday, callsMTD] = await Promise.all([
+      Lead.countDocuments(filter),
+      Lead.countDocuments({ ...filter, createdAt: { $gte: startOfToday } }),
+      Lead.countDocuments({ ...filter, createdAt: { $gte: startOfMonth } }),
+      Lead.countDocuments({ ...filter, leadStatusId: qualifiedStatus?._id }),
+      Lead.countDocuments({ ...filter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday } }),
+      Lead.countDocuments({ ...filter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfMonth } }),
+      Lead.countDocuments({ ...filter, leadStatusId: lostStatus?._id }),
+      Lead.countDocuments({ ...filter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfToday } }),
+      Lead.countDocuments({ ...filter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfMonth } }),
+      CallLog.countDocuments({ userId: req.user.userId, deletedAt: null }),
+      CallLog.countDocuments({ userId: req.user.userId, deletedAt: null, createdAt: { $gte: startOfToday } }),
+      CallLog.countDocuments({ userId: req.user.userId, deletedAt: null, createdAt: { $gte: startOfMonth } })
+    ]);
+
+    const dailyTrends = [];
+    for (let i = 29; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      date.setHours(0, 0, 0, 0);
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
+      
+      const [dayLeads, dayQualified, dayLost, dayCalls] = await Promise.all([
+        Lead.countDocuments({ ...filter, createdAt: { $gte: date, $lt: nextDate } }),
+        Lead.countDocuments({ ...filter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: date, $lt: nextDate } }),
+        Lead.countDocuments({ ...filter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: date, $lt: nextDate } }),
+        CallLog.countDocuments({ userId: req.user.userId, deletedAt: null, createdAt: { $gte: date, $lt: nextDate } })
+      ]);
+      
+      dailyTrends.push({
+        date: date.toISOString().split('T')[0],
+        leads: dayLeads,
+        qualified: dayQualified,
+        lost: dayLost,
+        calls: dayCalls
+      });
+    }
+
+    const sourceDistribution = await Lead.aggregate([
+      { $match: filter },
+      { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+      { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+      { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+
+    const conversionRate = totalLeads > 0 ? ((qualified / totalLeads) * 100).toFixed(2) : 0;
+
+    res.json({
+      totalLeads, leadsToday, leadsMTD, qualified, qualifiedToday, qualifiedMTD,
+      lost, lostToday, lostMTD, calls, callsToday, callsMTD,
+      dailyTrends, sourceDistribution, conversionRate, role: 'presales'
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch presales dashboard' });
+  }
+});
+
+// Marketing dashboard
+router.get('/marketing', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    if (user?.roleId?.slug !== 'marketing') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const [totalLeads, leadsToday, adLeads, campaignLeads] = await Promise.all([
+      Lead.countDocuments({ deletedAt: null }),
+      Lead.countDocuments({ deletedAt: null, createdAt: { $gte: startOfToday } }),
+      Lead.countDocuments({ deletedAt: null, adname: { $ne: null, $ne: '' } }),
+      Lead.countDocuments({ deletedAt: null, campaign: { $ne: null, $ne: '' } })
+    ]);
+
+    res.json({ totalLeads, leadsToday, adLeads, campaignLeads, role: 'marketing' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch marketing dashboard' });
   }
 });
 
