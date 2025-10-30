@@ -742,27 +742,27 @@ router.get('/admin', authenticateToken, async (req, res) => {
     // Build filters
     const leadFilter = { deletedAt: null };
     const callFilter = { deletedAt: null };
-
+      
     // Apply agent filter
-    if (agentId && agentId !== 'all') {
-      if (userType === 'sales') {
+      if (agentId && agentId !== 'all') {
+        if (userType === 'sales') {
         leadFilter.salesUserId = agentId;
-      } else if (userType === 'presales') {
+        } else if (userType === 'presales') {
         leadFilter.presalesUserId = agentId;
-      } else {
+        } else {
         leadFilter.$or = [{ salesUserId: agentId }, { presalesUserId: agentId }];
-      }
+        }
       callFilter.userId = agentId;
-    }
+      }
 
-    // Apply source filter
-    if (sourceId && sourceId !== 'all') {
+      // Apply source filter
+      if (sourceId && sourceId !== 'all') {
       leadFilter.sourceId = sourceId;
-    }
-
+      }
+      
     // Apply date filter
     const dateFilter = {};
-    if (startDate && endDate) {
+      if (startDate && endDate) {
       dateFilter.$gte = new Date(startDate);
       dateFilter.$lte = new Date(endDate);
     }
@@ -772,22 +772,22 @@ router.get('/admin', authenticateToken, async (req, res) => {
       Status.findOne({ slug: 'lost', type: 'leadStatus' }),
       Status.findOne({ slug: 'won', type: 'leadStatus' })
     ]);
-
+    
     // Get counts with filters applied
     const getLeadFilter = (additional = {}) => ({ ...leadFilter, ...additional });
     const getCallFilter = (additional = {}) => ({ ...callFilter, ...additional });
 
     // Build date filters similar to leads API
     let createdAtFilter = {};
-    if (startDate && endDate) {
+      if (startDate && endDate) {
       createdAtFilter = {
-        $gte: new Date(startDate),
-        $lte: (() => {
-          const toDate = new Date(endDate);
-          toDate.setHours(23, 59, 59, 999);
-          return toDate;
-        })()
-      };
+          $gte: new Date(startDate),
+          $lte: (() => {
+            const toDate = new Date(endDate);
+            toDate.setHours(23, 59, 59, 999);
+            return toDate;
+          })()
+        };
     }
 
     // Use date filters for MTD if dates provided, otherwise use current month
@@ -890,6 +890,39 @@ router.get('/admin', authenticateToken, async (req, res) => {
       { $sort: { count: -1 } }
     ]);
 
+    // Visit and meeting data
+    const [siteVisits, centerVisits, virtualMeetings] = await Promise.all([
+      Lead.countDocuments(getLeadFilter({ siteVisit: true })),
+      Lead.countDocuments(getLeadFilter({ centerVisit: true })),
+      Lead.countDocuments(getLeadFilter({ virtualMeeting: true }))
+    ]);
+
+    // Daily visit and meeting trends
+    const dailySiteVisits = [];
+    const dailyCenterVisits = [];
+    const dailyVirtualMeetings = [];
+    
+    const visitCurrentDate = new Date(chartStartDate);
+    while (visitCurrentDate <= chartEndDate) {
+      const date = new Date(visitCurrentDate);
+      date.setHours(0, 0, 0, 0);
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
+      
+      const [daySiteVisits, dayCenterVisits, dayVirtualMeetings] = await Promise.all([
+        Lead.countDocuments(getLeadFilter({ siteVisit: true, siteVisitCompletedDate: { $gte: date, $lt: nextDate } })),
+        Lead.countDocuments(getLeadFilter({ centerVisit: true, centerVisitCompletedDate: { $gte: date, $lt: nextDate } })),
+        Lead.countDocuments(getLeadFilter({ virtualMeeting: true, virtualMeetingCompletedDate: { $gte: date, $lt: nextDate } }))
+      ]);
+      
+      const dateStr = date.toISOString().split('T')[0];
+      dailySiteVisits.push({ date: dateStr, count: daySiteVisits });
+      dailyCenterVisits.push({ date: dateStr, count: dayCenterVisits });
+      dailyVirtualMeetings.push({ date: dateStr, count: dayVirtualMeetings });
+      
+      visitCurrentDate.setDate(visitCurrentDate.getDate() + 1);
+    }
+
     res.json({
       // Card metrics
       totalLeads, leadsMTD, leadsToday,
@@ -897,8 +930,11 @@ router.get('/admin', authenticateToken, async (req, res) => {
       totalQualified, qualifiedMTD, qualifiedToday,
       totalLost, lostMTD, lostToday,
       totalWon, wonMTD, wonToday,
+      // Visit and meeting metrics
+      siteVisits, centerVisits, virtualMeetings,
       // Charts data
       dailyLeads, dailyCalls, dailyQualified, dailyLost, dailyWon,
+      dailySiteVisits, dailyCenterVisits, dailyVirtualMeetings,
       sourceLeads, sourceQualified, sourceWon,
       role: 'admin'
     });
@@ -935,13 +971,15 @@ router.get('/admin/users/:type', authenticateToken, async (req, res) => {
     let roleFilter = {};
 
     if (type === 'sales') {
-      const salesRoles = await Role.find({ slug: { $in: ['sales_agent', 'hod_sales', 'sales_manager'] } });
+      const salesRoles = await Role.find({ slug: { $in: ['sales_agent'] } });
       roleFilter = { roleId: { $in: salesRoles.map(r => r._id) } };
     } else if (type === 'presales') {
-      const presalesRoles = await Role.find({ slug: { $in: ['presales_agent', 'hod_presales', 'manager_presales'] } });
+      const presalesRoles = await Role.find({ slug: { $in: ['presales_agent'] } });
+      roleFilter = { roleId: { $in: presalesRoles.map(r => r._id) } };
+    }else {
+      const presalesRoles = await Role.find({ slug: { $in: ['presales_agent','sales_agent'] } });
       roleFilter = { roleId: { $in: presalesRoles.map(r => r._id) } };
     }
-    // For 'all' type, no roleFilter is applied
 
     const users = await User.find({ ...roleFilter, deletedAt: null }).select('_id name email').sort({ name: 1 });
     res.json(users);
