@@ -18,6 +18,9 @@ const leadSourceRoutes = require('./routes/leadSources');
 const projectHouseTypeRoutes = require('./routes/projectAndHouseTypes');
 const leadRoutes = require('./routes/leads');
 const dashboardRoutes = require('./routes/dashboard');
+const callLogRoutes = require('./routes/callLogs');
+const activityLogRoutes = require('./routes/activityLogs');
+const leadActivityRoutes = require('./routes/leadActivities');
 const metaRoutes = require('./routes/meta');
 const { startTokenScheduler } = require('./utils/tokenScheduler');
 
@@ -89,6 +92,9 @@ app.use('/api/lead-sources', leadSourceRoutes);
 app.use('/api/project-house-types', projectHouseTypeRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/call-logs', callLogRoutes);
+app.use('/api/activity-logs', activityLogRoutes);
+app.use('/api/lead-activities', leadActivityRoutes);
 app.use('/api/meta', metaRoutes);
 
 // For Vercel deployment
