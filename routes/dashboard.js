@@ -729,7 +729,7 @@ router.get('/sales', authenticateToken, async (req, res) => {
 router.get('/admin', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
-    if (user?.roleId?.slug !== 'admin') {
+    if (!['admin', 'marketing'].includes(user?.roleId?.slug)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -763,8 +763,8 @@ router.get('/admin', authenticateToken, async (req, res) => {
 
       // Apply source filter
       if (sourceId && sourceId !== 'all') {
-      leadFilter.sourceId = sourceId;
-      leadActivityFilter.sourceId = sourceId;
+      leadFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
+      leadActivityFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
       }
       
     // Apply date filter
@@ -840,24 +840,27 @@ router.get('/admin', authenticateToken, async (req, res) => {
         totalQualified = qualifiedMTD = qualifiedToday = totalLost = lostMTD = lostToday = totalWon = wonMTD = wonToday = 0;
       }
     } else {
+      // Apply source filter to leadFilter for all queries
+      const baseLeadFilter = getLeadFilter();
+      
       // Use Lead table for other cases
       [totalLeads, leadsMTD, leadsToday, totalQualified, qualifiedMTD, qualifiedToday, totalLost, lostMTD, lostToday, totalWon, wonMTD, wonToday] = await Promise.all([
         // Total leads
-        Lead.countDocuments(getLeadFilter(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {})),
-        Lead.countDocuments(getLeadFilter({ createdAt: mtdFilter })),
-        Lead.countDocuments(getLeadFilter({ createdAt: { $gte: startOfToday } })),
+        Lead.countDocuments({ ...baseLeadFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) }),
+        Lead.countDocuments({ ...baseLeadFilter, createdAt: mtdFilter }),
+        Lead.countDocuments({ ...baseLeadFilter, createdAt: { $gte: startOfToday } }),
         // Qualified leads
-        Lead.countDocuments(getLeadFilter({ leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) })),
-        Lead.countDocuments(getLeadFilter({ leadStatusId: qualifiedStatus?._id, qualifiedDate: qualifiedMtdFilter })),
-        Lead.countDocuments(getLeadFilter({ leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday } })),
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) }),
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: qualifiedMtdFilter }),
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday } }),
         // Lost leads
-        Lead.countDocuments(getLeadFilter({ leadStatusId: lostStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) })),
-        Lead.countDocuments(getLeadFilter({ leadStatusId: lostStatus?._id, leadLostDate: lostMtdFilter })),
-        Lead.countDocuments(getLeadFilter({ leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfToday } })),
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: lostStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) }),
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: lostStatus?._id, leadLostDate: lostMtdFilter }),
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfToday } }),
         // Won leads
-        Lead.countDocuments(getLeadFilter({ leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) })),
-        Lead.countDocuments(getLeadFilter({ leadStatusId: wonStatus?._id, leadWonDate: wonMtdFilter })),
-        Lead.countDocuments(getLeadFilter({ leadStatusId: wonStatus?._id, leadWonDate: { $gte: startOfToday } }))
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) }),
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: wonStatus?._id, leadWonDate: wonMtdFilter }),
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: wonStatus?._id, leadWonDate: { $gte: startOfToday } })
       ]);
     }
     
@@ -885,11 +888,17 @@ router.get('/admin', authenticateToken, async (req, res) => {
       // Get assigned lead IDs first
       const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
       
+      // Build lead match filter with source filter applied
+      const leadMatchFilter = { _id: { $in: assignedLeadIds }, createdAt: { $gte: chartStartDate, $lte: chartEndDate } };
+      if (sourceId && sourceId !== 'all') {
+        leadMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
+      }
+      
       // Use aggregation for daily trends
       const [leadTrends, callTrends, qualifiedTrends, lostTrends, wonTrends] = await Promise.all([
         // Get leads assigned to this user and their creation dates
         Lead.aggregate([
-          { $match: { _id: { $in: assignedLeadIds }, createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $match: leadMatchFilter },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
           { $sort: { _id: 1 } }
         ]),
@@ -899,17 +908,17 @@ router.get('/admin', authenticateToken, async (req, res) => {
           { $sort: { _id: 1 } }
         ]),
         assignedLeadIds.length > 0 ? Lead.aggregate([
-          { $match: { _id: { $in: assignedLeadIds }, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $match: { ...leadMatchFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$qualifiedDate" } }, count: { $sum: 1 } } },
           { $sort: { _id: 1 } }
         ]) : [],
         assignedLeadIds.length > 0 ? Lead.aggregate([
-          { $match: { _id: { $in: assignedLeadIds }, leadStatusId: lostStatus?._id, leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $match: { ...leadMatchFilter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } } },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadLostDate" } }, count: { $sum: 1 } } },
           { $sort: { _id: 1 } }
         ]) : [],
         assignedLeadIds.length > 0 ? Lead.aggregate([
-          { $match: { _id: { $in: assignedLeadIds }, leadStatusId: wonStatus?._id, leadWonDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $match: { ...leadMatchFilter, leadStatusId: wonStatus?._id, leadWonDate: { $gte: chartStartDate, $lte: chartEndDate } } },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadWonDate" } }, count: { $sum: 1 } } },
           { $sort: { _id: 1 } }
         ]) : []
@@ -930,9 +939,10 @@ router.get('/admin', authenticateToken, async (req, res) => {
       dailyWon = dateRange.map(date => ({ date, count: wonTrends.find(t => t._id === date)?.count || 0 }));
     } else {
       // Use aggregation for regular leads
+      const baseLeadFilter = getLeadFilter();
       const [leadTrends, callTrends, qualifiedTrends, lostTrends, wonTrends] = await Promise.all([
         Lead.aggregate([
-          { $match: getLeadFilter({ createdAt: { $gte: chartStartDate, $lte: chartEndDate } }) },
+          { $match: { ...baseLeadFilter, createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
           { $sort: { _id: 1 } }
         ]),
@@ -942,17 +952,17 @@ router.get('/admin', authenticateToken, async (req, res) => {
           { $sort: { _id: 1 } }
         ]),
         Lead.aggregate([
-          { $match: getLeadFilter({ leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: chartStartDate, $lte: chartEndDate } }) },
+          { $match: { ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$qualifiedDate" } }, count: { $sum: 1 } } },
           { $sort: { _id: 1 } }
         ]),
         Lead.aggregate([
-          { $match: getLeadFilter({ leadStatusId: lostStatus?._id, leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } }) },
+          { $match: { ...baseLeadFilter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } } },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadLostDate" } }, count: { $sum: 1 } } },
           { $sort: { _id: 1 } }
         ]),
         Lead.aggregate([
-          { $match: getLeadFilter({ leadStatusId: wonStatus?._id, leadWonDate: { $gte: chartStartDate, $lte: chartEndDate } }) },
+          { $match: { ...baseLeadFilter, leadStatusId: wonStatus?._id, leadWonDate: { $gte: chartStartDate, $lte: chartEndDate } } },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadWonDate" } }, count: { $sum: 1 } } },
           { $sort: { _id: 1 } }
         ])
@@ -977,43 +987,48 @@ router.get('/admin', authenticateToken, async (req, res) => {
     let sourceLeads, sourceQualified, sourceWon;
     
     if (useLeadActivity) {
-      // Use LeadActivity for source distribution
-      sourceLeads = await LeadActivity.aggregate([
-        { $match: getLeadActivityFilter() },
-        { $group: { _id: '$leadId' } },
-        { $lookup: { from: 'leads', localField: '_id', foreignField: '_id', as: 'lead' } },
-        { $unwind: '$lead' },
-        { $lookup: { from: 'leadsources', localField: 'lead.sourceId', foreignField: '_id', as: 'source' } },
-        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
-        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
-        { $sort: { count: -1 } }
-      ]);
+      // Get assigned lead IDs first
+      const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
       
-      sourceQualified = await LeadActivity.aggregate([
-        { $match: getLeadActivityFilter({ leadStatusId: qualifiedStatus?._id }) },
-        { $group: { _id: '$leadId' } },
-        { $lookup: { from: 'leads', localField: '_id', foreignField: '_id', as: 'lead' } },
-        { $unwind: '$lead' },
-        { $lookup: { from: 'leadsources', localField: 'lead.sourceId', foreignField: '_id', as: 'source' } },
-        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
-        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
-        { $sort: { count: -1 } }
-      ]);
-      
-      sourceWon = await LeadActivity.aggregate([
-        { $match: getLeadActivityFilter({ leadStatusId: wonStatus?._id }) },
-        { $group: { _id: '$leadId' } },
-        { $lookup: { from: 'leads', localField: '_id', foreignField: '_id', as: 'lead' } },
-        { $unwind: '$lead' },
-        { $lookup: { from: 'leadsources', localField: 'lead.sourceId', foreignField: '_id', as: 'source' } },
-        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
-        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
-        { $sort: { count: -1 } }
-      ]);
+      if (assignedLeadIds.length > 0) {
+        // Build lead match filter with source filter applied
+        const sourceMatchFilter = { _id: { $in: assignedLeadIds } };
+        if (sourceId && sourceId !== 'all') {
+          sourceMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
+        }
+        
+        // Use Lead table with assigned lead IDs for source distribution
+        sourceLeads = await Lead.aggregate([
+          { $match: sourceMatchFilter },
+          { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+          { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+          { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+          { $sort: { count: -1 } }
+        ]);
+        
+        sourceQualified = await Lead.aggregate([
+          { $match: { ...sourceMatchFilter, leadStatusId: qualifiedStatus?._id } },
+          { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+          { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+          { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+          { $sort: { count: -1 } }
+        ]);
+        
+        sourceWon = await Lead.aggregate([
+          { $match: { ...sourceMatchFilter, leadStatusId: wonStatus?._id } },
+          { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+          { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+          { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+          { $sort: { count: -1 } }
+        ]);
+      } else {
+        sourceLeads = sourceQualified = sourceWon = [];
+      }
     } else {
       // Use Lead table for source distribution
+      const baseLeadFilter = getLeadFilter();
       sourceLeads = await Lead.aggregate([
-        { $match: getLeadFilter() },
+        { $match: baseLeadFilter },
         { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
         { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
         { $group: { _id: '$sourceName', count: { $sum: 1 } } },
@@ -1021,7 +1036,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
       ]);
 
       sourceQualified = await Lead.aggregate([
-        { $match: getLeadFilter({ leadStatusId: qualifiedStatus?._id }) },
+        { $match: { ...baseLeadFilter, leadStatusId: qualifiedStatus?._id } },
         { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
         { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
         { $group: { _id: '$sourceName', count: { $sum: 1 } } },
@@ -1029,7 +1044,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
       ]);
 
       sourceWon = await Lead.aggregate([
-        { $match: getLeadFilter({ leadStatusId: wonStatus?._id }) },
+        { $match: { ...baseLeadFilter, leadStatusId: wonStatus?._id } },
         { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
         { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
         { $group: { _id: '$sourceName', count: { $sum: 1 } } },
@@ -1041,53 +1056,196 @@ router.get('/admin', authenticateToken, async (req, res) => {
     let siteVisits, centerVisits, virtualMeetings;
     
     if (useLeadActivity) {
-      [siteVisits, centerVisits, virtualMeetings] = await Promise.all([
-        LeadActivity.distinct('leadId', getLeadActivityFilter({ siteVisit: true })).then(ids => ids.length),
-        LeadActivity.distinct('leadId', getLeadActivityFilter({ centerVisit: true })).then(ids => ids.length),
-        LeadActivity.distinct('leadId', getLeadActivityFilter({ virtualMeeting: true })).then(ids => ids.length)
-      ]);
+      // Get assigned lead IDs first
+      const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
+      
+      if (assignedLeadIds.length > 0) {
+        // Build visit filter with source filter applied
+        const visitMatchFilter = { _id: { $in: assignedLeadIds } };
+        if (sourceId && sourceId !== 'all') {
+          visitMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
+        }
+        
+        [siteVisits, centerVisits, virtualMeetings] = await Promise.all([
+          Lead.countDocuments({ ...visitMatchFilter, siteVisit: true }),
+          Lead.countDocuments({ ...visitMatchFilter, centerVisit: true }),
+          Lead.countDocuments({ ...visitMatchFilter, virtualMeeting: true })
+        ]);
+      } else {
+        siteVisits = centerVisits = virtualMeetings = 0;
+      }
     } else {
+      const baseLeadFilter = getLeadFilter();
       [siteVisits, centerVisits, virtualMeetings] = await Promise.all([
-        Lead.countDocuments(getLeadFilter({ siteVisit: true })),
-        Lead.countDocuments(getLeadFilter({ centerVisit: true })),
-        Lead.countDocuments(getLeadFilter({ virtualMeeting: true }))
+        Lead.countDocuments({ ...baseLeadFilter, siteVisit: true }),
+        Lead.countDocuments({ ...baseLeadFilter, centerVisit: true }),
+        Lead.countDocuments({ ...baseLeadFilter, virtualMeeting: true })
       ]);
     }
 
-    // Daily visit and meeting trends
-    const dailySiteVisits = [];
-    const dailyCenterVisits = [];
-    const dailyVirtualMeetings = [];
+    // Daily visit and meeting trends using aggregation
+    let dailySiteVisits = [], dailyCenterVisits = [], dailyVirtualMeetings = [];
     
-    const visitCurrentDate = new Date(chartStartDate);
-    while (visitCurrentDate <= chartEndDate) {
-      const date = new Date(visitCurrentDate);
-      date.setHours(0, 0, 0, 0);
-      const nextDate = new Date(date);
-      nextDate.setDate(nextDate.getDate() + 1);
+    if (useLeadActivity) {
+      // Get assigned lead IDs first
+      const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
       
-      let daySiteVisits, dayCenterVisits, dayVirtualMeetings;
-      
-      if (useLeadActivity) {
-        [daySiteVisits, dayCenterVisits, dayVirtualMeetings] = await Promise.all([
-          LeadActivity.distinct('leadId', getLeadActivityFilter({ siteVisit: true, siteVisitCompletedDate: { $gte: date, $lt: nextDate } })).then(ids => ids.length),
-          LeadActivity.distinct('leadId', getLeadActivityFilter({ centerVisit: true, centerVisitCompletedDate: { $gte: date, $lt: nextDate } })).then(ids => ids.length),
-          LeadActivity.distinct('leadId', getLeadActivityFilter({ virtualMeeting: true, virtualMeetingCompletedDate: { $gte: date, $lt: nextDate } })).then(ids => ids.length)
+      if (assignedLeadIds.length > 0) {
+        // Build visit match filter with source filter applied
+        const visitMatchFilter = { _id: { $in: assignedLeadIds } };
+        if (sourceId && sourceId !== 'all') {
+          visitMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
+        }
+        
+        // Use aggregation for daily visit trends
+        const [siteVisitTrends, centerVisitTrends, virtualMeetingTrends] = await Promise.all([
+          Lead.aggregate([
+            { $match: { ...visitMatchFilter, siteVisit: true, siteVisitCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$siteVisitCompletedDate" } }, count: { $sum: 1 } } },
+            { $sort: { _id: 1 } }
+          ]),
+          Lead.aggregate([
+            { $match: { ...visitMatchFilter, centerVisit: true, centerVisitCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$centerVisitCompletedDate" } }, count: { $sum: 1 } } },
+            { $sort: { _id: 1 } }
+          ]),
+          Lead.aggregate([
+            { $match: { ...visitMatchFilter, virtualMeeting: true, virtualMeetingCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$virtualMeetingCompletedDate" } }, count: { $sum: 1 } } },
+            { $sort: { _id: 1 } }
+          ])
         ]);
+        
+        // Convert to arrays with all dates
+        const dateRange = [];
+        const currentDate = new Date(chartStartDate);
+        while (currentDate <= chartEndDate) {
+          dateRange.push(currentDate.toISOString().split('T')[0]);
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+        
+        dailySiteVisits = dateRange.map(date => ({ date, count: siteVisitTrends.find(t => t._id === date)?.count || 0 }));
+        dailyCenterVisits = dateRange.map(date => ({ date, count: centerVisitTrends.find(t => t._id === date)?.count || 0 }));
+        dailyVirtualMeetings = dateRange.map(date => ({ date, count: virtualMeetingTrends.find(t => t._id === date)?.count || 0 }));
       } else {
-        [daySiteVisits, dayCenterVisits, dayVirtualMeetings] = await Promise.all([
-          Lead.countDocuments(getLeadFilter({ siteVisit: true, siteVisitCompletedDate: { $gte: date, $lt: nextDate } })),
-          Lead.countDocuments(getLeadFilter({ centerVisit: true, centerVisitCompletedDate: { $gte: date, $lt: nextDate } })),
-          Lead.countDocuments(getLeadFilter({ virtualMeeting: true, virtualMeetingCompletedDate: { $gte: date, $lt: nextDate } }))
-        ]);
+        // No assigned leads, return empty arrays with dates
+        const dateRange = [];
+        const currentDate = new Date(chartStartDate);
+        while (currentDate <= chartEndDate) {
+          dateRange.push(currentDate.toISOString().split('T')[0]);
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+        
+        dailySiteVisits = dateRange.map(date => ({ date, count: 0 }));
+        dailyCenterVisits = dateRange.map(date => ({ date, count: 0 }));
+        dailyVirtualMeetings = dateRange.map(date => ({ date, count: 0 }));
+      }
+    } else {
+      // Use aggregation for regular leads
+      const baseLeadFilter = getLeadFilter();
+      const [siteVisitTrends, centerVisitTrends, virtualMeetingTrends] = await Promise.all([
+        Lead.aggregate([
+          { $match: { ...baseLeadFilter, siteVisit: true, siteVisitCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$siteVisitCompletedDate" } }, count: { $sum: 1 } } },
+          { $sort: { _id: 1 } }
+        ]),
+        Lead.aggregate([
+          { $match: { ...baseLeadFilter, centerVisit: true, centerVisitCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$centerVisitCompletedDate" } }, count: { $sum: 1 } } },
+          { $sort: { _id: 1 } }
+        ]),
+        Lead.aggregate([
+          { $match: { ...baseLeadFilter, virtualMeeting: true, virtualMeetingCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$virtualMeetingCompletedDate" } }, count: { $sum: 1 } } },
+          { $sort: { _id: 1 } }
+        ])
+      ]);
+      
+      // Convert to arrays with all dates
+      const dateRange = [];
+      const currentDate = new Date(chartStartDate);
+      while (currentDate <= chartEndDate) {
+        dateRange.push(currentDate.toISOString().split('T')[0]);
+        currentDate.setDate(currentDate.getDate() + 1);
       }
       
-      const dateStr = date.toISOString().split('T')[0];
-      dailySiteVisits.push({ date: dateStr, count: daySiteVisits });
-      dailyCenterVisits.push({ date: dateStr, count: dayCenterVisits });
-      dailyVirtualMeetings.push({ date: dateStr, count: dayVirtualMeetings });
+      dailySiteVisits = dateRange.map(date => ({ date, count: siteVisitTrends.find(t => t._id === date)?.count || 0 }));
+      dailyCenterVisits = dateRange.map(date => ({ date, count: centerVisitTrends.find(t => t._id === date)?.count || 0 }));
+      dailyVirtualMeetings = dateRange.map(date => ({ date, count: virtualMeetingTrends.find(t => t._id === date)?.count || 0 }));
+    }
+
+    // Additional charts for agent filters
+    let dailyQualificationRate = [], dailyCallsPerLead = [];
+    
+    if (useLeadActivity && (userType === 'presales' || userType === 'sales')) {
+      // Get assigned lead IDs first
+      const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
       
-      visitCurrentDate.setDate(visitCurrentDate.getDate() + 1);
+      if (assignedLeadIds.length > 0) {
+        // Build match filter with source filter applied
+        const agentMatchFilter = { _id: { $in: assignedLeadIds } };
+        if (sourceId && sourceId !== 'all') {
+          agentMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
+        }
+        
+        // Daily qualification rate and calls per lead
+        const dateRange = [];
+        const currentDate = new Date(chartStartDate);
+        while (currentDate <= chartEndDate) {
+          dateRange.push(currentDate.toISOString().split('T')[0]);
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+        
+        // Get daily data for qualification rate and calls per lead
+        const [dailyLeadAllocations, dailyQualifications, dailyCallCounts] = await Promise.all([
+          // Daily lead allocations
+          LeadActivity.aggregate([
+            { $match: { ...getLeadActivityFilter(), createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+            { $group: { _id: { date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, leadId: "$leadId" } } },
+            { $group: { _id: "$_id.date", count: { $sum: 1 } } },
+            { $sort: { _id: 1 } }
+          ]),
+          // Daily qualifications
+          Lead.aggregate([
+            { $match: { ...agentMatchFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$qualifiedDate" } }, count: { $sum: 1 } } },
+            { $sort: { _id: 1 } }
+          ]),
+          // Daily call counts
+          CallLog.aggregate([
+            { $match: { ...getCallFilter(), createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+            { $sort: { _id: 1 } }
+          ])
+        ]);
+        
+        // Calculate daily qualification rate (qualified/allocated)
+        dailyQualificationRate = dateRange.map(date => {
+          const allocated = dailyLeadAllocations.find(t => t._id === date)?.count || 0;
+          const qualified = dailyQualifications.find(t => t._id === date)?.count || 0;
+          const rate = allocated > 0 ? ((qualified / allocated) * 100).toFixed(2) : 0;
+          return { date, rate: parseFloat(rate), allocated, qualified };
+        });
+        
+        // Calculate daily calls per lead (calls/allocated)
+        dailyCallsPerLead = dateRange.map(date => {
+          const allocated = dailyLeadAllocations.find(t => t._id === date)?.count || 0;
+          const calls = dailyCallCounts.find(t => t._id === date)?.count || 0;
+          const ratio = allocated > 0 ? (calls / allocated).toFixed(2) : 0;
+          return { date, ratio: parseFloat(ratio), calls, allocated };
+        });
+      } else {
+        // No assigned leads, return empty arrays with dates
+        const dateRange = [];
+        const currentDate = new Date(chartStartDate);
+        while (currentDate <= chartEndDate) {
+          dateRange.push(currentDate.toISOString().split('T')[0]);
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+        
+        dailyQualificationRate = dateRange.map(date => ({ date, rate: 0, allocated: 0, qualified: 0 }));
+        dailyCallsPerLead = dateRange.map(date => ({ date, ratio: 0, calls: 0, allocated: 0 }));
+      }
     }
 
     res.json({
@@ -1103,6 +1261,8 @@ router.get('/admin', authenticateToken, async (req, res) => {
       dailyLeads, dailyCalls, dailyQualified, dailyLost, dailyWon,
       dailySiteVisits, dailyCenterVisits, dailyVirtualMeetings,
       sourceLeads, sourceQualified, sourceWon,
+      // Agent-specific charts
+      dailyQualificationRate, dailyCallsPerLead,
       role: 'admin'
     });
   } catch (error) {
@@ -1114,7 +1274,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
 router.get('/admin/sources', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
-    if (user?.roleId?.slug !== 'admin') {
+    if (!['admin', 'marketing'].includes(user?.roleId?.slug)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1130,7 +1290,7 @@ router.get('/admin/sources', authenticateToken, async (req, res) => {
 router.get('/admin/users/:type', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
-    if (user?.roleId?.slug !== 'admin') {
+    if (!['admin', 'marketing'].includes(user?.roleId?.slug)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
