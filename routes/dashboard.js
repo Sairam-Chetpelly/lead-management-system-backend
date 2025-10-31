@@ -122,7 +122,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
     if (isPresalesView) {
       const presalesUserId = presalesAgent ? new mongoose.Types.ObjectId(presalesAgent) : new mongoose.Types.ObjectId(req.user.userId);
       presalesLeadIds = await LeadActivity.find({
-        presalesUserId: presalesUserId
+        presalesUserId: presalesUserId,
+        deletedAt: null
       }).distinct('leadId');
     }
     
@@ -135,7 +136,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
       if (qualifiedStatus && presalesLeadIds.length > 0) {
         const qualifiedPresalesLeads = await LeadActivity.find({
           leadId: { $in: presalesLeadIds },
-          leadStatusId: qualifiedStatus._id
+          leadStatusId: qualifiedStatus._id,
+          deletedAt: null
         }).distinct('leadId');
         totalQualifiedHistorically = qualifiedPresalesLeads.length;
       }
@@ -145,7 +147,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
         const qualifiedMTDLeads = await LeadActivity.find({
           leadId: { $in: presalesLeadIds },
           leadStatusId: qualifiedStatus._id,
-          createdAt: { $gte: startOfMonth }
+          createdAt: { $gte: startOfMonth },
+          deletedAt: null
         }).distinct('leadId');
         qualifiedMTD = qualifiedMTDLeads.length;
       }
@@ -155,7 +158,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
         const qualifiedTodayLeads = await LeadActivity.find({
           leadId: { $in: presalesLeadIds },
           leadStatusId: qualifiedStatus._id,
-          createdAt: { $gte: startOfToday }
+          createdAt: { $gte: startOfToday },
+          deletedAt: null
         }).distinct('leadId');
         qualifiedToday = qualifiedTodayLeads.length;
       }
@@ -164,7 +168,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
       if (lostStatus && presalesLeadIds.length > 0) {
         const lostPresalesLeads = await LeadActivity.find({
           leadId: { $in: presalesLeadIds },
-          leadStatusId: lostStatus._id
+          leadStatusId: lostStatus._id,
+          deletedAt: null
         }).distinct('leadId');
         totalLostHistorically = lostPresalesLeads.length;
       }
@@ -174,7 +179,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
         const lostMTDLeads = await LeadActivity.find({
           leadId: { $in: presalesLeadIds },
           leadStatusId: lostStatus._id,
-          createdAt: { $gte: startOfMonth }
+          createdAt: { $gte: startOfMonth },
+          deletedAt: null
         }).distinct('leadId');
         lostMTD = lostMTDLeads.length;
       }
@@ -184,7 +190,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
         const lostTodayLeads = await LeadActivity.find({
           leadId: { $in: presalesLeadIds },
           leadStatusId: lostStatus._id,
-          createdAt: { $gte: startOfToday }
+          createdAt: { $gte: startOfToday },
+          deletedAt: null
         }).distinct('leadId');
         lostToday = lostTodayLeads.length;
       }
@@ -286,7 +293,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
           const dayQualifiedLeads = await LeadActivity.find({
             leadId: { $in: presalesLeadIds },
             leadStatusId: qualifiedStatus._id,
-            createdAt: { $gte: date, $lt: nextDate }
+            createdAt: { $gte: date, $lt: nextDate },
+            deletedAt: null
           }).distinct('leadId');
           dayQualifiedCount = dayQualifiedLeads.length;
         }
@@ -294,7 +302,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
           const dayLostLeads = await LeadActivity.find({
             leadId: { $in: presalesLeadIds },
             leadStatusId: lostStatus._id,
-            createdAt: { $gte: date, $lt: nextDate }
+            createdAt: { $gte: date, $lt: nextDate },
+            deletedAt: null
           }).distinct('leadId');
           dayLostCount = dayLostLeads.length;
         }
@@ -812,13 +821,23 @@ router.get('/admin', authenticateToken, async (req, res) => {
       // Get all leads ever assigned to this user
       const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
       
-      // Use LeadActivity for sales and presales user counts
-      [totalLeads, leadsMTD, leadsToday] = await Promise.all([
-        // Total leads from LeadActivity
-        LeadActivity.distinct('leadId', getLeadActivityFilter(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {})).then(ids => ids.length),
-        LeadActivity.distinct('leadId', getLeadActivityFilter({ createdAt: mtdFilter })).then(ids => ids.length),
-        LeadActivity.distinct('leadId', getLeadActivityFilter({ createdAt: { $gte: startOfToday } })).then(ids => ids.length)
-      ]);
+      // Use Lead table with assigned lead IDs for accurate lead creation dates
+      if (assignedLeadIds.length > 0) {
+        // Build lead match filter with source filter applied
+        const leadMatchFilter = { _id: { $in: assignedLeadIds } };
+        if (sourceId && sourceId !== 'all') {
+          leadMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
+        }
+        
+        [totalLeads, leadsMTD, leadsToday] = await Promise.all([
+          // Total leads using Lead table createdAt
+          Lead.countDocuments({ ...leadMatchFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) }),
+          Lead.countDocuments({ ...leadMatchFilter, createdAt: mtdFilter }),
+          Lead.countDocuments({ ...leadMatchFilter, createdAt: { $gte: startOfToday } })
+        ]);
+      } else {
+        totalLeads = leadsMTD = leadsToday = 0;
+      }
       
       // For qualified/lost/won, check current status of leads that were ever assigned to this user
       if (assignedLeadIds.length > 0) {
@@ -837,7 +856,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: wonStatus?._id, leadWonDate: { $gte: startOfToday } })
         ]);
       } else {
-        totalQualified = qualifiedMTD = qualifiedToday = totalLost = lostMTD = lostToday = totalWon = wonMTD = wonToday = 0;
+        totalLeads = leadsMTD = leadsToday = totalQualified = qualifiedMTD = qualifiedToday = totalLost = lostMTD = lostToday = totalWon = wonMTD = wonToday = 0;
       }
     } else {
       // Apply source filter to leadFilter for all queries
@@ -1198,11 +1217,10 @@ router.get('/admin', authenticateToken, async (req, res) => {
         
         // Get daily data for qualification rate and calls per lead
         const [dailyLeadAllocations, dailyQualifications, dailyCallCounts] = await Promise.all([
-          // Daily lead allocations
-          LeadActivity.aggregate([
-            { $match: { ...getLeadActivityFilter(), createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
-            { $group: { _id: { date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, leadId: "$leadId" } } },
-            { $group: { _id: "$_id.date", count: { $sum: 1 } } },
+          // Daily lead allocations using Lead table createdAt
+          Lead.aggregate([
+            { $match: { ...agentMatchFilter, createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
             { $sort: { _id: 1 } }
           ]),
           // Daily qualifications

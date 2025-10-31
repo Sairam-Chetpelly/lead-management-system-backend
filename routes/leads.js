@@ -1052,12 +1052,9 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Date range filters - status-based or creation-based with OR logic for activities
     if (req.query.dateFrom || req.query.dateTo) {
-      const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom) : null;
-      const dateTo = req.query.dateTo ? (() => {
-        const toDate = new Date(req.query.dateTo);
-        toDate.setHours(23, 59, 59, 999);
-        return toDate;
-      })() : null;
+      const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom + 'T00:00:00.000Z') : null;
+      const dateTo = req.query.dateTo ? new Date(req.query.dateTo + 'T23:59:59.999Z') : null;
+      console.log('Date range filter applied. From:', dateFrom, 'To:', dateTo);
 
       // Check if any activity filters are selected
       const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true';
@@ -1119,13 +1116,15 @@ router.get('/', authenticateToken, async (req, res) => {
           else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
         }
 
-        console.log('Using date field for filtering:', dateField);
-        filter[dateField] = {};
-        if (dateFrom) {
-          filter[dateField].$gte = dateFrom;
-        }
-        if (dateTo) {
-          filter[dateField].$lte = dateTo;
+        console.log('Using date field for filtering:', dateField, 'From:', dateFrom, 'To:', dateTo);
+        
+        // Build date filter condition
+        const dateCondition = {};
+        if (dateFrom) dateCondition.$gte = dateFrom;
+        if (dateTo) dateCondition.$lte = dateTo;
+        
+        if (Object.keys(dateCondition).length > 0) {
+          filter[dateField] = dateCondition;
         }
       }
     }
@@ -1274,12 +1273,8 @@ router.get('/export', authenticateToken, async (req, res) => {
 
     // Date range filters with OR logic for activities
     if (req.query.dateFrom || req.query.dateTo) {
-      const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom) : null;
-      const dateTo = req.query.dateTo ? (() => {
-        const toDate = new Date(req.query.dateTo);
-        toDate.setHours(23, 59, 59, 999);
-        return toDate;
-      })() : null;
+      const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom + 'T00:00:00.000Z') : null;
+      const dateTo = req.query.dateTo ? new Date(req.query.dateTo + 'T23:59:59.999Z') : null;
 
       // Check if any activity filters are selected
       const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true';
@@ -1339,12 +1334,13 @@ router.get('/export', authenticateToken, async (req, res) => {
           else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
         }
 
-        filter[dateField] = {};
-        if (dateFrom) {
-          filter[dateField].$gte = dateFrom;
-        }
-        if (dateTo) {
-          filter[dateField].$lte = dateTo;
+        // Build date filter condition
+        const dateCondition = {};
+        if (dateFrom) dateCondition.$gte = dateFrom;
+        if (dateTo) dateCondition.$lte = dateTo;
+        
+        if (Object.keys(dateCondition).length > 0) {
+          filter[dateField] = dateCondition;
         }
       }
     }
