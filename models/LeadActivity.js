@@ -185,6 +185,11 @@ const leadActivitySchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  cpUserName: {
+    type: String,
+    required: false,
+    default: null
+  },
   files: {
     type: mongoose.Schema.Types.Mixed,
     required: false

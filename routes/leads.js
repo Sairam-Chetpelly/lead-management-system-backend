@@ -248,7 +248,8 @@ router.post('/', authenticateToken, async (req, res) => {
       languageId,
       projectTypeId,
       houseTypeId,
-      leadValue
+      leadValue,
+      cpUserName
     } = req.body;
 
     // Validate required fields
@@ -278,7 +279,8 @@ router.post('/', authenticateToken, async (req, res) => {
       contactNumber,
       sourceId: leadSource._id,
       updatedPerson: req?.user?.userId,
-      comment
+      comment,
+      cpUserName
     };
 
     // Only add optional fields if they have values
@@ -1412,6 +1414,7 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Ad Name': cleanTextForCSV(lead?.adname) || '',
       'Ad Set': cleanTextForCSV(lead?.adset) || '',
       'Ad Campaign': cleanTextForCSV(lead?.campaign) || '',
+      'CP User Name': cleanTextForCSV(lead?.cpUserName) || '',
       'Updated By': lead.updatedPerson?.name || '',
       'Created At': new Date(lead.createdAt).toLocaleString(),
       'Updated At': new Date(lead.updatedAt).toLocaleString()
@@ -1707,6 +1710,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
       apartmentName: req.body.apartmentName || lead.apartmentName,
       leadValue: req.body.leadValue || lead.leadValue,
       comment: req.body.comment || lead.comment,
+      cpUserName: req.body.cpUserName || lead.cpUserName,
       updatedPerson: req.user.userId,
       files: lead.files
     };
@@ -1864,7 +1868,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       'houseTypeId', 'expectedPossessionDate', 'leadValue',
       'siteVisit', 'siteVisitDate', 'siteVisitCompletedDate', 'centerVisit', 'centerVisitDate', 'centerVisitCompletedDate',
       'virtualMeeting', 'virtualMeetingDate', 'virtualMeetingCompletedDate', 'meetingArrangedDate', 'comment', 'cifDate',
-      'outOfStation', 'requirementWithinTwoMonths'
+      'outOfStation', 'requirementWithinTwoMonths', 'cpUserName'
     ];
 
     fieldsToUpdate.forEach(field => {
