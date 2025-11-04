@@ -2505,16 +2505,34 @@ router.post('/webhook/meta-ads', async (req, res) => {
                   }
                 }
 
-                // Get or create platform-specific lead source
-                const sourceSlug = platform;
-                let leadSource = await LeadSource.findOne({ slug: sourceSlug });
-                if (!leadSource) {
-                  leadSource = new LeadSource({
-                    name: platform === 'instagram' ? 'Instagram' : 'Facebook',
-                    slug: sourceSlug,
-                    description: `Leads from ${platform === 'instagram' ? 'Instagram' : 'Facebook'} Ads campaigns`
-                  });
-                  await leadSource.save();
+                // Check if campaign is Channel Partners
+                const isChannelPartners = campaignName && campaignName.toLowerCase().includes('channel partners');
+                
+                // Get or create lead source based on campaign
+                let leadSource;
+                if (isChannelPartners) {
+                  // Use CP source for Channel Partners campaigns
+                  leadSource = await LeadSource.findOne({ slug: 'cp' });
+                  if (!leadSource) {
+                    leadSource = new LeadSource({
+                      name: 'Channel Partners',
+                      slug: 'cp',
+                      description: 'Leads from Channel Partners campaigns'
+                    });
+                    await leadSource.save();
+                  }
+                } else {
+                  // Use platform-specific source for regular campaigns
+                  const sourceSlug = platform;
+                  leadSource = await LeadSource.findOne({ slug: sourceSlug });
+                  if (!leadSource) {
+                    leadSource = new LeadSource({
+                      name: platform === 'instagram' ? 'Instagram' : 'Facebook',
+                      slug: sourceSlug,
+                      description: `Leads from ${platform === 'instagram' ? 'Instagram' : 'Facebook'} Ads campaigns`
+                    });
+                    await leadSource.save();
+                  }
                 }
 
                 // Get lead status
@@ -2523,8 +2541,8 @@ router.post('/webhook/meta-ads', async (req, res) => {
                   console.error('Meta api lead create time,Lead status not found');
                 }
 
-                // Get next presales agent
-                const presalesAgent = await getNextPresalesAgent();
+                // Get next presales agent based on campaign type
+                const presalesAgent = await getNextPresalesAgent(isChannelPartners);
                 if (!presalesAgent) {
                   console.error('Meta api lead create time, Presales agent not found');
                 }
