@@ -1752,7 +1752,6 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
         if (salesAgent) {
           console.log('Assigned to sales agent:', salesAgent.name);
           updatedData.salesUserId = salesAgent._id;
-          updatedData.presalesUserId = null; // Clear presales assignment
         }
 
         // Set sub-status to hot
@@ -1765,19 +1764,11 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
       } else if (leadStatus && leadStatus.slug === 'won') {
         console.log('Lead status changed to won');
         updatedData.leadWonDate = new Date();
-        updatedData.leadSubStatusId = null;
-        updatedData.presalesUserId = null;
-        updatedData.salesUserId = null;
         updatedData.cifDate = null;
         updatedData.meetingArrangedDate = null;
       } else if (leadStatus && leadStatus.slug === 'lost') {
         console.log('Lead status changed to lost');
         updatedData.leadLostDate = new Date();
-        updatedData.leadSubStatusId = null;
-        updatedData.presalesUserId = null;
-        updatedData.salesUserId = null;
-        updatedData.cifDate = null;
-        updatedData.meetingArrangedDate = null;
       }
     }
 
@@ -1930,8 +1921,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
           }
         }
 
-        // Clear presales assignment when moving to sales
-        updatedData.presalesUserId = null;
+        // Keep presales assignment for tracking
 
         // Set default sub-status for qualified leads
         if (!req.body.leadSubStatusId) {
@@ -1943,18 +1933,8 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
         }
       } else if (leadStatus && leadStatus.slug === 'won') {
         updatedData.leadWonDate = new Date();
-        updatedData.leadSubStatusId = null;
-        updatedData.presalesUserId = null;
-        updatedData.salesUserId = null;
-        updatedData.cifDate = null;
-        updatedData.meetingArrangedDate = null;
       } else if (leadStatus && leadStatus.slug === 'lost') {
         updatedData.leadLostDate = new Date();
-        updatedData.leadSubStatusId = null;
-        updatedData.presalesUserId = null;
-        updatedData.salesUserId = null;
-        updatedData.cifDate = null;
-        updatedData.meetingArrangedDate = null;
       }
     }
 
