@@ -746,7 +746,9 @@ router.get('/admin', authenticateToken, async (req, res) => {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    startOfToday.setHours(5, 30, 0, 0);
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
 
     // Build filters
     const leadFilter = { deletedAt: null };
@@ -813,8 +815,6 @@ router.get('/admin', authenticateToken, async (req, res) => {
     const lostMtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
     const wonMtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
 
-    const LeadActivity = require('../models/LeadActivity');
-
     let totalLeads, leadsMTD, leadsToday, totalQualified, qualifiedMTD, qualifiedToday, totalLost, lostMTD, lostToday, totalWon, wonMTD, wonToday;
 
     if (useLeadActivity) {
@@ -833,7 +833,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           // Total leads using Lead table createdAt
           Lead.countDocuments({ ...leadMatchFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) }),
           Lead.countDocuments({ ...leadMatchFilter, createdAt: mtdFilter }),
-          Lead.countDocuments({ ...leadMatchFilter, createdAt: { $gte: startOfToday } })
+          Lead.countDocuments({ ...leadMatchFilter, createdAt: { $gte: startOfToday, $lte: endOfToday } })
         ]);
       } else {
         totalLeads = leadsMTD = leadsToday = 0;
@@ -845,15 +845,15 @@ router.get('/admin', authenticateToken, async (req, res) => {
           // Qualified leads - current status of assigned leads
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) }),
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: qualifiedStatus?._id, qualifiedDate: qualifiedMtdFilter }),
-          Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday } }),
+          Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday, $lte: endOfToday } }),
           // Lost leads - current status of assigned leads
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: lostStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) }),
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: lostStatus?._id, leadLostDate: lostMtdFilter }),
-          Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfToday } }),
+          Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfToday, $lte: endOfToday } }),
           // Won leads - current status of assigned leads
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) }),
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: wonStatus?._id, leadWonDate: wonMtdFilter }),
-          Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: wonStatus?._id, leadWonDate: { $gte: startOfToday } })
+          Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: wonStatus?._id, leadWonDate: { $gte: startOfToday, $lte: endOfToday } })
         ]);
       } else {
         totalLeads = leadsMTD = leadsToday = totalQualified = qualifiedMTD = qualifiedToday = totalLost = lostMTD = lostToday = totalWon = wonMTD = wonToday = 0;
@@ -867,19 +867,19 @@ router.get('/admin', authenticateToken, async (req, res) => {
         // Total leads
         Lead.countDocuments({ ...baseLeadFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) }),
         Lead.countDocuments({ ...baseLeadFilter, createdAt: mtdFilter }),
-        Lead.countDocuments({ ...baseLeadFilter, createdAt: { $gte: startOfToday } }),
+        Lead.countDocuments({ ...baseLeadFilter, createdAt: { $gte: startOfToday, $lte: endOfToday} }),
         // Qualified leads
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) }),
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: qualifiedMtdFilter }),
-        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday } }),
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday, $lte: endOfToday } }),
         // Lost leads
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: lostStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) }),
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: lostStatus?._id, leadLostDate: lostMtdFilter }),
-        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfToday } }),
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfToday, $lte: endOfToday } }),
         // Won leads
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) }),
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: wonStatus?._id, leadWonDate: wonMtdFilter }),
-        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: wonStatus?._id, leadWonDate: { $gte: startOfToday } })
+        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: wonStatus?._id, leadWonDate: { $gte: startOfToday, $lte: endOfToday } })
       ]);
     }
 
@@ -887,7 +887,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
     const [totalCalls, callsMTD, callsToday] = await Promise.all([
       CallLog.countDocuments(getCallFilter(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {})),
       CallLog.countDocuments(getCallFilter({ createdAt: mtdFilter })),
-      CallLog.countDocuments(getCallFilter({ createdAt: { $gte: startOfToday } }))
+      CallLog.countDocuments(getCallFilter({ createdAt: { $gte: startOfToday, $lte: endOfToday } }))
     ]);
 
     // Daily trends using aggregation for better performance
