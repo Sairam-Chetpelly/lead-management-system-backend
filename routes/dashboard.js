@@ -33,21 +33,21 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
-    
+
     // Get user role for filtering
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
-    
+
     // Fetch all required statuses once
     const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
     const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
     const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
     const activeStatus = await Status.findOne({ slug: 'active', type: 'status' });
-    
+
     // Build base filter for leads based on user role and filters (synchronous now)
     const getLeadFilter = (additionalFilter = {}) => {
       let filter = { deletedAt: null };
-      
+
       // Apply role-specific filters first
       if (userRole === 'presales_agent' && !presalesAgent) {
         filter.presalesUserId = new mongoose.Types.ObjectId(req.user.userId);
@@ -66,12 +66,12 @@ router.get('/stats', authenticateToken, async (req, res) => {
         }
       }
       // Admin role - no additional filters, can see all data
-      
+
       // Apply presales agent filter if provided
       if (presalesAgent) {
         filter.presalesUserId = new mongoose.Types.ObjectId(presalesAgent);
       }
-      
+
       // Apply date range filter if provided
       if (dateRange) {
         const [startDate, endDate] = dateRange.split(',');
@@ -82,15 +82,15 @@ router.get('/stats', authenticateToken, async (req, res) => {
           };
         }
       }
-      
+
       // Merge additional filter last to allow overrides
       return { ...filter, ...additionalFilter };
     };
-    
+
     // Presales specific filter - only leads assigned to presales (synchronous)
     const getPresalesLeadFilter = (additionalFilter = {}) => {
       let filter = { deletedAt: null, presalesUserId: { $ne: null } };
-      
+
       // Apply user filter
       if (presalesAgent) {
         filter.presalesUserId = new mongoose.Types.ObjectId(presalesAgent);
@@ -98,7 +98,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
         filter.presalesUserId = new mongoose.Types.ObjectId(req.user.userId);
       }
       // Admin role - no additional user filter for presales leads
-      
+
       // Apply date range filter if provided
       if (dateRange) {
         const [startDate, endDate] = dateRange.split(',');
@@ -109,14 +109,14 @@ router.get('/stats', authenticateToken, async (req, res) => {
           };
         }
       }
-      
+
       // Merge additional filter last to allow overrides
       return { ...filter, ...additionalFilter };
     };
-    
+
     // For presales agents, use presales-specific metrics
     const isPresalesView = userRole === 'presales_agent' || !!presalesAgent;
-    
+
     // Pre-compute presalesLeadIds once for efficiency
     let presalesLeadIds = [];
     if (isPresalesView) {
@@ -126,11 +126,11 @@ router.get('/stats', authenticateToken, async (req, res) => {
         deletedAt: null
       }).distinct('leadId');
     }
-    
+
     // Qualified and lost counts
     let totalQualifiedHistorically = 0, qualifiedMTD = 0, qualifiedToday = 0;
     let totalLostHistorically = 0, lostMTD = 0, lostToday = 0;
-    
+
     if (isPresalesView) {
       // Historical qualified leads (ever qualified)
       if (qualifiedStatus && presalesLeadIds.length > 0) {
@@ -141,7 +141,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
         }).distinct('leadId');
         totalQualifiedHistorically = qualifiedPresalesLeads.length;
       }
-      
+
       // MTD qualified leads
       if (qualifiedStatus && presalesLeadIds.length > 0) {
         const qualifiedMTDLeads = await LeadActivity.find({
@@ -152,7 +152,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
         }).distinct('leadId');
         qualifiedMTD = qualifiedMTDLeads.length;
       }
-      
+
       // Today's qualified leads
       if (qualifiedStatus && presalesLeadIds.length > 0) {
         const qualifiedTodayLeads = await LeadActivity.find({
@@ -163,7 +163,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
         }).distinct('leadId');
         qualifiedToday = qualifiedTodayLeads.length;
       }
-      
+
       // Historical lost leads (ever lost)
       if (lostStatus && presalesLeadIds.length > 0) {
         const lostPresalesLeads = await LeadActivity.find({
@@ -173,7 +173,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
         }).distinct('leadId');
         totalLostHistorically = lostPresalesLeads.length;
       }
-      
+
       // MTD lost leads
       if (lostStatus && presalesLeadIds.length > 0) {
         const lostMTDLeads = await LeadActivity.find({
@@ -184,7 +184,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
         }).distinct('leadId');
         lostMTD = lostMTDLeads.length;
       }
-      
+
       // Today's lost leads
       if (lostStatus && presalesLeadIds.length > 0) {
         const lostTodayLeads = await LeadActivity.find({
@@ -198,45 +198,45 @@ router.get('/stats', authenticateToken, async (req, res) => {
     } else {
       const qualifiedFilter = qualifiedStatus ? { leadStatusId: qualifiedStatus._id } : {};
       totalQualifiedHistorically = await Lead.countDocuments(getLeadFilter(qualifiedFilter));
-      
+
       // Use qualifiedDate for consistency with daily trends
       qualifiedMTD = qualifiedStatus ? await Lead.countDocuments(getLeadFilter({ ...qualifiedFilter, qualifiedDate: { $gte: startOfMonth } })) : 0;
       qualifiedToday = qualifiedStatus ? await Lead.countDocuments(getLeadFilter({ ...qualifiedFilter, qualifiedDate: { $gte: startOfToday } })) : 0;
-      
+
       const lostFilter = lostStatus ? { leadStatusId: lostStatus._id } : {};
       totalLostHistorically = await Lead.countDocuments(getLeadFilter(lostFilter));
-      
+
       // Use lostDate for consistency with daily trends
       lostMTD = lostStatus ? await Lead.countDocuments(getLeadFilter({ ...lostFilter, leadLostDate: { $gte: startOfMonth } })) : 0;
       lostToday = lostStatus ? await Lead.countDocuments(getLeadFilter({ ...lostFilter, leadLostDate: { $gte: startOfToday } })) : 0;
     }
-    
+
     // Total leads historically (assigned to presales)
-    const totalLeadsHistorically = isPresalesView ? 
+    const totalLeadsHistorically = isPresalesView ?
       await Lead.countDocuments(getPresalesLeadFilter()) :
       await Lead.countDocuments(getLeadFilter());
-    
+
     // Leads Month to Date (assigned to presales)
     const leadsMonthToDate = isPresalesView ?
       await Lead.countDocuments(getPresalesLeadFilter({ createdAt: { $gte: startOfMonth } })) :
       await Lead.countDocuments(getLeadFilter({ createdAt: { $gte: startOfMonth } }));
-    
+
     // Today's leads (assigned to presales)
     const todayLeads = isPresalesView ?
       await Lead.countDocuments(getPresalesLeadFilter({ createdAt: { $gte: startOfToday } })) :
       await Lead.countDocuments(getLeadFilter({ createdAt: { $gte: startOfToday } }));
-    
+
     // Call filters
     const getCallFilter = (additionalFilter = {}) => {
       let filter = { deletedAt: null, ...additionalFilter };
-      
+
       if (presalesAgent) {
         filter.userId = new mongoose.Types.ObjectId(presalesAgent);
       } else if (userRole === 'presales_agent' || userRole === 'sales_agent') {
         filter.userId = new mongoose.Types.ObjectId(req.user.userId);
       }
       // Admin role - no user filter, can see all calls
-      
+
       if (dateRange) {
         const [startDate, endDate] = dateRange.split(',');
         if (startDate && endDate) {
@@ -246,45 +246,45 @@ router.get('/stats', authenticateToken, async (req, res) => {
           };
         }
       }
-      
+
       return filter;
     };
-    
+
     // Total calls historically
     const totalCallsHistorically = await CallLog.countDocuments(getCallFilter());
-    
+
     // Calls MTD
     const callsMTD = await CallLog.countDocuments(getCallFilter({ createdAt: { $gte: startOfMonth } }));
-    
+
     // Today's calls
     const todayCalls = await CallLog.countDocuments(getCallFilter({ createdAt: { $gte: startOfToday } }));
-    
+
     // Won and lost leads (filtered by role)
     const wonLeads = wonStatus ? await Lead.countDocuments(getLeadFilter({ leadStatusId: wonStatus._id })) : 0;
     const lostLeads = totalLostHistorically;
-    
+
     // Daily trends (last 30 days)
     const dailyLeadTrend = [];
     const dailyCallTrend = [];
     const dailyLeadsVsCalls = [];
     const dailyQualifiedTrend = [];
     const dailyLostTrend = [];
-    
+
     for (let i = 29; i >= 0; i--) {
       const date = new Date();
       date.setDate(date.getDate() - i);
       date.setHours(0, 0, 0, 0);
       const nextDate = new Date(date);
       nextDate.setDate(nextDate.getDate() + 1);
-      
+
       const dayLeadCount = isPresalesView ?
         await Lead.countDocuments(getPresalesLeadFilter({ createdAt: { $gte: date, $lt: nextDate } })) :
         await Lead.countDocuments(getLeadFilter({ createdAt: { $gte: date, $lt: nextDate } }));
-      
+
       const dayCallCount = await CallLog.countDocuments(getCallFilter({
         createdAt: { $gte: date, $lt: nextDate }
       }));
-      
+
       // Daily qualified and lost leads count
       let dayQualifiedCount = 0;
       let dayLostCount = 0;
@@ -315,35 +315,35 @@ router.get('/stats', authenticateToken, async (req, res) => {
           dayLostCount = await Lead.countDocuments(getLeadFilter({ leadStatusId: lostStatus._id, leadLostDate: { $gte: date, $lt: nextDate } }));
         }
       }
-      
+
       const isoDate = date.toISOString().split('T')[0];
       dailyLeadTrend.push({
         date: isoDate,
         count: dayLeadCount
       });
-      
+
       dailyCallTrend.push({
         date: isoDate,
         count: dayCallCount
       });
-      
+
       dailyQualifiedTrend.push({
         date: isoDate,
         count: dayQualifiedCount
       });
-      
+
       dailyLostTrend.push({
         date: isoDate,
         count: dayLostCount
       });
-      
+
       dailyLeadsVsCalls.push({
         date: isoDate,
         leads: dayLeadCount,
         calls: dayCallCount
       });
     }
-    
+
     // Status distribution
     const statusPipeline = [
       { $match: getLeadFilter() },
@@ -371,22 +371,22 @@ router.get('/stats', authenticateToken, async (req, res) => {
       { $sort: { count: -1 } },
       { $limit: 6 }
     ];
-    
+
     const statusDistribution = await Lead.aggregate(statusPipeline);
-    
+
     // Lead value distribution
     const valuePipeline = [
       { $match: getLeadFilter() },
       { $group: { _id: '$leadValue', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ];
-    
+
     const valueResults = await Lead.aggregate(valuePipeline);
     const leadValueDistribution = valueResults.map(item => ({
       _id: item._id || 'Not Set',
       count: item.count
     }));
-    
+
     // Source-wise qualified lead distribution
     const qualifiedFilter = qualifiedStatus ? { leadStatusId: qualifiedStatus._id } : {};
     const sourceQualifiedPipeline = [
@@ -413,9 +413,9 @@ router.get('/stats', authenticateToken, async (req, res) => {
       { $group: { _id: '$sourceName', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ];
-    
+
     const sourceQualifiedDistribution = await Lead.aggregate(sourceQualifiedPipeline);
-    
+
     // Source-wise won lead distribution (filtered)
     const sourceWonPipeline = [
       { $match: getLeadFilter({ leadStatusId: wonStatus?._id }) },
@@ -441,9 +441,9 @@ router.get('/stats', authenticateToken, async (req, res) => {
       { $group: { _id: '$sourceName', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ];
-    
+
     const sourceWonDistribution = await Lead.aggregate(sourceWonPipeline);
-    
+
     // Source-wise lead distribution (all leads)
     const sourcePipeline = [
       { $match: getLeadFilter() },
@@ -469,9 +469,9 @@ router.get('/stats', authenticateToken, async (req, res) => {
       { $group: { _id: '$sourceName', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ];
-    
+
     const sourceDistribution = await Lead.aggregate(sourcePipeline);
-    
+
     // Center-wise distribution
     const centerPipeline = [
       { $match: getLeadFilter() },
@@ -497,9 +497,9 @@ router.get('/stats', authenticateToken, async (req, res) => {
       { $group: { _id: '$centreName', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ];
-    
+
     const centerDistribution = await Lead.aggregate(centerPipeline);
-    
+
     // Language-wise distribution
     const languagePipeline = [
       { $match: getLeadFilter() },
@@ -525,14 +525,14 @@ router.get('/stats', authenticateToken, async (req, res) => {
       { $group: { _id: '$languageName', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ];
-    
+
     const languageDistribution = await Lead.aggregate(languagePipeline);
-    
+
     // Lead sub-status distribution for sales users and admin
     let leadSubStatusDistribution = [];
     if (userRole === 'sales_agent' || userRole === 'admin' || userRole === 'hod_sales' || userRole === 'sales_manager') {
       let subStatusFilter = { deletedAt: null };
-      
+
       if (userRole === 'sales_agent') {
         subStatusFilter.salesUserId = new mongoose.Types.ObjectId(req.user.userId);
         const excludeStatuses = [wonStatus?._id, lostStatus?._id].filter(Boolean);
@@ -543,7 +543,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
         subStatusFilter.centreId = user.centreId;
       }
       // Admin sees all
-      
+
       const subStatusPipeline = [
         { $match: subStatusFilter },
         { $group: { _id: '$leadSubStatusId', count: { $sum: 1 } } },
@@ -569,39 +569,39 @@ router.get('/stats', authenticateToken, async (req, res) => {
         { $project: { _id: '$subStatusName', count: 1 } },
         { $sort: { count: -1 } }
       ];
-      
+
       leadSubStatusDistribution = await Lead.aggregate(subStatusPipeline);
     }
-    
+
     // Get user counts based on role
     let totalUsers = 0;
     let activeUsers = 0;
-    
+
     if (userRole === 'hod_presales' || userRole === 'manager_presales') {
       // Only show presales users
-      const presalesRoles = await Role.find({ 
+      const presalesRoles = await Role.find({
         slug: { $in: ['presales_agent', 'hod_presales', 'manager_presales'] }
       });
       const presalesRoleIds = presalesRoles.map(role => role._id);
-      
-      totalUsers = await User.countDocuments({ 
+
+      totalUsers = await User.countDocuments({
         deletedAt: null,
         roleId: { $in: presalesRoleIds }
       });
-      
-      activeUsers = activeStatus ? await User.countDocuments({ 
+
+      activeUsers = activeStatus ? await User.countDocuments({
         deletedAt: null,
         roleId: { $in: presalesRoleIds },
         statusId: activeStatus._id
       }) : 0;
     } else if (userRole === 'hod_sales' || userRole === 'sales_manager') {
       // Only show users from their center
-      totalUsers = await User.countDocuments({ 
+      totalUsers = await User.countDocuments({
         deletedAt: null,
         centreId: user.centreId
       });
-      
-      activeUsers = activeStatus ? await User.countDocuments({ 
+
+      activeUsers = activeStatus ? await User.countDocuments({
         deletedAt: null,
         centreId: user.centreId,
         statusId: activeStatus._id
@@ -609,18 +609,18 @@ router.get('/stats', authenticateToken, async (req, res) => {
     } else {
       // Show all users for other roles
       totalUsers = await User.countDocuments({ deletedAt: null });
-      activeUsers = activeStatus ? await User.countDocuments({ 
+      activeUsers = activeStatus ? await User.countDocuments({
         deletedAt: null,
         statusId: activeStatus._id
       }) : 0;
     }
-    
+
     // Calculate MQL percentage (for presales: qualified/allocated)
     const mqlPercentage = totalLeadsHistorically > 0 ? ((totalQualifiedHistorically / totalLeadsHistorically) * 100).toFixed(2) : 0;
-    
+
     // Daily MQL percentage for presales
     const dailyMqlPercentage = todayLeads > 0 ? ((qualifiedToday / todayLeads) * 100).toFixed(2) : 0;
-    
+
     res.json({
       // Numbers at top
       totalLeadsHistorically,
@@ -632,31 +632,31 @@ router.get('/stats', authenticateToken, async (req, res) => {
       totalQualifiedHistorically,
       qualifiedMTD,
       qualifiedToday,
-      
+
       // Legacy fields for compatibility
       totalLeads: totalLeadsHistorically,
       weekLeads: leadsMonthToDate,
       wonLeads,
       lostLeads,
-      
+
       // Trends
       dailyLeadTrend,
       dailyCallTrend,
       weeklyTrend: dailyLeadTrend, // For backward compatibility
       weeklyCallTrend: dailyCallTrend,
-      
+
       // MQL percentage
       mqlPercentage,
       dailyMqlPercentage,
       dailyLeadsVsCalls,
       dailyQualifiedTrend,
       dailyLostTrend,
-      
+
       // Lost leads (now included for all views)
       totalLostHistorically,
       lostMTD,
       lostToday,
-      
+
       // Charts data
       statusDistribution,
       leadValueDistribution,
@@ -669,7 +669,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
       totalUsers,
       activeUsers
     });
-    
+
   } catch (error) {
     console.error('Error fetching dashboard stats:', error);
     res.status(500).json({ error: 'Failed to fetch dashboard statistics' });
@@ -683,12 +683,12 @@ router.get('/presales-agents', authenticateToken, async (req, res) => {
     if (!presalesRole) {
       return res.json([]);
     }
-    
+
     const presalesAgents = await User.find({
       roleId: presalesRole._id,
       deletedAt: null
     }).select('name _id');
-    
+
     res.json(presalesAgents);
   } catch (error) {
     console.error('Error fetching presales agents:', error);
@@ -701,7 +701,7 @@ router.get('/sales', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
-    
+
     if (!['sales_agent', 'hod_sales', 'sales_manager'].includes(userRole)) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -753,32 +753,32 @@ router.get('/admin', authenticateToken, async (req, res) => {
     const callFilter = { deletedAt: null };
     let useLeadActivity = false;
     let leadActivityFilter = { deletedAt: null };
-      
+
     // Apply agent filter
-      if (agentId && agentId !== 'all') {
-        if (userType === 'sales') {
+    if (agentId && agentId !== 'all') {
+      if (userType === 'sales') {
         // For sales, use LeadActivity table to get accurate counts
         useLeadActivity = true;
         leadActivityFilter.salesUserId = new mongoose.Types.ObjectId(agentId);
-        } else if (userType === 'presales') {
+      } else if (userType === 'presales') {
         // For presales, use LeadActivity table to get accurate counts
         useLeadActivity = true;
         leadActivityFilter.presalesUserId = new mongoose.Types.ObjectId(agentId);
-        } else {
+      } else {
         leadFilter.$or = [{ salesUserId: agentId }, { presalesUserId: agentId }];
-        }
-      callFilter.userId = new mongoose.Types.ObjectId(agentId);
       }
+      callFilter.userId = new mongoose.Types.ObjectId(agentId);
+    }
 
-      // Apply source filter
-      if (sourceId && sourceId !== 'all') {
+    // Apply source filter
+    if (sourceId && sourceId !== 'all') {
       leadFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
       leadActivityFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
-      }
-      
+    }
+
     // Apply date filter
     const dateFilter = {};
-      if (startDate && endDate) {
+    if (startDate && endDate) {
       dateFilter.$gte = new Date(startDate);
       dateFilter.$lte = new Date(endDate);
     }
@@ -788,7 +788,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
       Status.findOne({ slug: 'lost', type: 'leadStatus' }),
       Status.findOne({ slug: 'won', type: 'leadStatus' })
     ]);
-    
+
     // Get counts with filters applied
     const getLeadFilter = (additional = {}) => ({ ...leadFilter, ...additional });
     const getLeadActivityFilter = (additional = {}) => ({ ...leadActivityFilter, ...additional });
@@ -796,15 +796,15 @@ router.get('/admin', authenticateToken, async (req, res) => {
 
     // Build date filters similar to leads API
     let createdAtFilter = {};
-      if (startDate && endDate) {
+    if (startDate && endDate) {
       createdAtFilter = {
-          $gte: new Date(startDate),
-          $lte: (() => {
-            const toDate = new Date(endDate);
-            toDate.setHours(23, 59, 59, 999);
-            return toDate;
-          })()
-        };
+        $gte: new Date(startDate),
+        $lte: (() => {
+          const toDate = new Date(endDate);
+          toDate.setHours(23, 59, 59, 999);
+          return toDate;
+        })()
+      };
     }
 
     // Use date filters for MTD if dates provided, otherwise use current month
@@ -814,13 +814,13 @@ router.get('/admin', authenticateToken, async (req, res) => {
     const wonMtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
 
     const LeadActivity = require('../models/LeadActivity');
-    
+
     let totalLeads, leadsMTD, leadsToday, totalQualified, qualifiedMTD, qualifiedToday, totalLost, lostMTD, lostToday, totalWon, wonMTD, wonToday;
-    
+
     if (useLeadActivity) {
       // Get all leads ever assigned to this user
       const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
-      
+
       // Use Lead table with assigned lead IDs for accurate lead creation dates
       if (assignedLeadIds.length > 0) {
         // Build lead match filter with source filter applied
@@ -828,7 +828,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
         if (sourceId && sourceId !== 'all') {
           leadMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
         }
-        
+
         [totalLeads, leadsMTD, leadsToday] = await Promise.all([
           // Total leads using Lead table createdAt
           Lead.countDocuments({ ...leadMatchFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) }),
@@ -838,7 +838,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
       } else {
         totalLeads = leadsMTD = leadsToday = 0;
       }
-      
+
       // For qualified/lost/won, check current status of leads that were ever assigned to this user
       if (assignedLeadIds.length > 0) {
         [totalQualified, qualifiedMTD, qualifiedToday, totalLost, lostMTD, lostToday, totalWon, wonMTD, wonToday] = await Promise.all([
@@ -861,7 +861,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
     } else {
       // Apply source filter to leadFilter for all queries
       const baseLeadFilter = getLeadFilter();
-      
+
       // Use Lead table for other cases
       [totalLeads, leadsMTD, leadsToday, totalQualified, qualifiedMTD, qualifiedToday, totalLost, lostMTD, lostToday, totalWon, wonMTD, wonToday] = await Promise.all([
         // Total leads
@@ -882,7 +882,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: wonStatus?._id, leadWonDate: { $gte: startOfToday } })
       ]);
     }
-    
+
     // Get call counts
     const [totalCalls, callsMTD, callsToday] = await Promise.all([
       CallLog.countDocuments(getCallFilter(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {})),
@@ -900,19 +900,19 @@ router.get('/admin', authenticateToken, async (req, res) => {
       chartStartDate = new Date();
       chartStartDate.setDate(chartStartDate.getDate() - 29);
     }
-    
+
     let dailyLeads = [], dailyCalls = [], dailyQualified = [], dailyLost = [], dailyWon = [];
-    
+
     if (useLeadActivity) {
       // Get assigned lead IDs first
       const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
-      
+
       // Build lead match filter with source filter applied
       const leadMatchFilter = { _id: { $in: assignedLeadIds }, createdAt: { $gte: chartStartDate, $lte: chartEndDate } };
       if (sourceId && sourceId !== 'all') {
         leadMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
       }
-      
+
       // Use aggregation for daily trends
       const [leadTrends, callTrends, qualifiedTrends, lostTrends, wonTrends] = await Promise.all([
         // Get leads assigned to this user and their creation dates
@@ -942,7 +942,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           { $sort: { _id: 1 } }
         ]) : []
       ]);
-      
+
       // Convert to arrays with all dates
       const dateRange = [];
       const currentDate = new Date(chartStartDate);
@@ -950,7 +950,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
         dateRange.push(currentDate.toISOString().split('T')[0]);
         currentDate.setDate(currentDate.getDate() + 1);
       }
-      
+
       dailyLeads = dateRange.map(date => ({ date, count: leadTrends.find(t => t._id === date)?.count || 0 }));
       dailyCalls = dateRange.map(date => ({ date, count: callTrends.find(t => t._id === date)?.count || 0 }));
       dailyQualified = dateRange.map(date => ({ date, count: qualifiedTrends.find(t => t._id === date)?.count || 0 }));
@@ -986,7 +986,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           { $sort: { _id: 1 } }
         ])
       ]);
-      
+
       // Convert to arrays with all dates
       const dateRange = [];
       const currentDate = new Date(chartStartDate);
@@ -994,7 +994,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
         dateRange.push(currentDate.toISOString().split('T')[0]);
         currentDate.setDate(currentDate.getDate() + 1);
       }
-      
+
       dailyLeads = dateRange.map(date => ({ date, count: leadTrends.find(t => t._id === date)?.count || 0 }));
       dailyCalls = dateRange.map(date => ({ date, count: callTrends.find(t => t._id === date)?.count || 0 }));
       dailyQualified = dateRange.map(date => ({ date, count: qualifiedTrends.find(t => t._id === date)?.count || 0 }));
@@ -1004,18 +1004,18 @@ router.get('/admin', authenticateToken, async (req, res) => {
 
     // Source-wise data
     let sourceLeads, sourceQualified, sourceWon;
-    
+
     if (useLeadActivity) {
       // Get assigned lead IDs first
       const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
-      
+
       if (assignedLeadIds.length > 0) {
         // Build lead match filter with source filter applied
         const sourceMatchFilter = { _id: { $in: assignedLeadIds } };
         if (sourceId && sourceId !== 'all') {
           sourceMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
         }
-        
+
         // Use Lead table with assigned lead IDs for source distribution
         sourceLeads = await Lead.aggregate([
           { $match: sourceMatchFilter },
@@ -1024,7 +1024,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           { $group: { _id: '$sourceName', count: { $sum: 1 } } },
           { $sort: { count: -1 } }
         ]);
-        
+
         sourceQualified = await Lead.aggregate([
           { $match: { ...sourceMatchFilter, leadStatusId: qualifiedStatus?._id } },
           { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
@@ -1032,7 +1032,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           { $group: { _id: '$sourceName', count: { $sum: 1 } } },
           { $sort: { count: -1 } }
         ]);
-        
+
         sourceWon = await Lead.aggregate([
           { $match: { ...sourceMatchFilter, leadStatusId: wonStatus?._id } },
           { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
@@ -1073,18 +1073,18 @@ router.get('/admin', authenticateToken, async (req, res) => {
 
     // Visit and meeting data
     let siteVisits, centerVisits, virtualMeetings;
-    
+
     if (useLeadActivity) {
       // Get assigned lead IDs first
       const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
-      
+
       if (assignedLeadIds.length > 0) {
         // Build visit filter with source filter applied
         const visitMatchFilter = { _id: { $in: assignedLeadIds } };
         if (sourceId && sourceId !== 'all') {
           visitMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
         }
-        
+
         [siteVisits, centerVisits, virtualMeetings] = await Promise.all([
           Lead.countDocuments({ ...visitMatchFilter, siteVisit: true }),
           Lead.countDocuments({ ...visitMatchFilter, centerVisit: true }),
@@ -1104,18 +1104,18 @@ router.get('/admin', authenticateToken, async (req, res) => {
 
     // Daily visit and meeting trends using aggregation
     let dailySiteVisits = [], dailyCenterVisits = [], dailyVirtualMeetings = [];
-    
+
     if (useLeadActivity) {
       // Get assigned lead IDs first
       const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
-      
+
       if (assignedLeadIds.length > 0) {
         // Build visit match filter with source filter applied
         const visitMatchFilter = { _id: { $in: assignedLeadIds } };
         if (sourceId && sourceId !== 'all') {
           visitMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
         }
-        
+
         // Use aggregation for daily visit trends
         const [siteVisitTrends, centerVisitTrends, virtualMeetingTrends] = await Promise.all([
           Lead.aggregate([
@@ -1134,7 +1134,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
             { $sort: { _id: 1 } }
           ])
         ]);
-        
+
         // Convert to arrays with all dates
         const dateRange = [];
         const currentDate = new Date(chartStartDate);
@@ -1142,7 +1142,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           dateRange.push(currentDate.toISOString().split('T')[0]);
           currentDate.setDate(currentDate.getDate() + 1);
         }
-        
+
         dailySiteVisits = dateRange.map(date => ({ date, count: siteVisitTrends.find(t => t._id === date)?.count || 0 }));
         dailyCenterVisits = dateRange.map(date => ({ date, count: centerVisitTrends.find(t => t._id === date)?.count || 0 }));
         dailyVirtualMeetings = dateRange.map(date => ({ date, count: virtualMeetingTrends.find(t => t._id === date)?.count || 0 }));
@@ -1154,7 +1154,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           dateRange.push(currentDate.toISOString().split('T')[0]);
           currentDate.setDate(currentDate.getDate() + 1);
         }
-        
+
         dailySiteVisits = dateRange.map(date => ({ date, count: 0 }));
         dailyCenterVisits = dateRange.map(date => ({ date, count: 0 }));
         dailyVirtualMeetings = dateRange.map(date => ({ date, count: 0 }));
@@ -1179,7 +1179,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           { $sort: { _id: 1 } }
         ])
       ]);
-      
+
       // Convert to arrays with all dates
       const dateRange = [];
       const currentDate = new Date(chartStartDate);
@@ -1187,7 +1187,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
         dateRange.push(currentDate.toISOString().split('T')[0]);
         currentDate.setDate(currentDate.getDate() + 1);
       }
-      
+
       dailySiteVisits = dateRange.map(date => ({ date, count: siteVisitTrends.find(t => t._id === date)?.count || 0 }));
       dailyCenterVisits = dateRange.map(date => ({ date, count: centerVisitTrends.find(t => t._id === date)?.count || 0 }));
       dailyVirtualMeetings = dateRange.map(date => ({ date, count: virtualMeetingTrends.find(t => t._id === date)?.count || 0 }));
@@ -1195,18 +1195,18 @@ router.get('/admin', authenticateToken, async (req, res) => {
 
     // Additional charts for agent filters
     let dailyQualificationRate = [], dailyCallsPerLead = [];
-    
+
     if (useLeadActivity && (userType === 'presales' || userType === 'sales')) {
       // Get assigned lead IDs first
       const assignedLeadIds = await LeadActivity.distinct('leadId', getLeadActivityFilter());
-      
+
       if (assignedLeadIds.length > 0) {
         // Build match filter with source filter applied
         const agentMatchFilter = { _id: { $in: assignedLeadIds } };
         if (sourceId && sourceId !== 'all') {
           agentMatchFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
         }
-        
+
         // Daily qualification rate and calls per lead
         const dateRange = [];
         const currentDate = new Date(chartStartDate);
@@ -1214,7 +1214,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           dateRange.push(currentDate.toISOString().split('T')[0]);
           currentDate.setDate(currentDate.getDate() + 1);
         }
-        
+
         // Get daily data for qualification rate and calls per lead
         const [dailyLeadAllocations, dailyQualifications, dailyCallCounts] = await Promise.all([
           // Daily lead allocations using Lead table createdAt
@@ -1236,7 +1236,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
             { $sort: { _id: 1 } }
           ])
         ]);
-        
+
         // Calculate daily qualification rate (qualified/allocated)
         dailyQualificationRate = dateRange.map(date => {
           const allocated = dailyLeadAllocations.find(t => t._id === date)?.count || 0;
@@ -1244,7 +1244,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           const rate = allocated > 0 ? ((qualified / allocated) * 100).toFixed(2) : 0;
           return { date, rate: parseFloat(rate), allocated, qualified };
         });
-        
+
         // Calculate daily calls per lead (calls/allocated)
         dailyCallsPerLead = dateRange.map(date => {
           const allocated = dailyLeadAllocations.find(t => t._id === date)?.count || 0;
@@ -1260,7 +1260,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           dateRange.push(currentDate.toISOString().split('T')[0]);
           currentDate.setDate(currentDate.getDate() + 1);
         }
-        
+
         dailyQualificationRate = dateRange.map(date => ({ date, rate: 0, allocated: 0, qualified: 0 }));
         dailyCallsPerLead = dateRange.map(date => ({ date, ratio: 0, calls: 0, allocated: 0 }));
       }
@@ -1321,8 +1321,8 @@ router.get('/admin/users/:type', authenticateToken, async (req, res) => {
     } else if (type === 'presales') {
       const presalesRoles = await Role.find({ slug: { $in: ['presales_agent'] } });
       roleFilter = { roleId: { $in: presalesRoles.map(r => r._id) } };
-    }else {
-      const presalesRoles = await Role.find({ slug: { $in: ['presales_agent','sales_agent'] } });
+    } else {
+      const presalesRoles = await Role.find({ slug: { $in: ['presales_agent', 'sales_agent'] } });
       roleFilter = { roleId: { $in: presalesRoles.map(r => r._id) } };
     }
 
@@ -1338,7 +1338,7 @@ router.get('/presales', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
-    
+
     if (!['presales_agent', 'hod_presales', 'manager_presales'].includes(userRole)) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -1381,14 +1381,14 @@ router.get('/presales', authenticateToken, async (req, res) => {
       date.setHours(0, 0, 0, 0);
       const nextDate = new Date(date);
       nextDate.setDate(nextDate.getDate() + 1);
-      
+
       const [dayLeads, dayQualified, dayLost, dayCalls] = await Promise.all([
         Lead.countDocuments({ ...filter, createdAt: { $gte: date, $lt: nextDate } }),
         Lead.countDocuments({ ...filter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: date, $lt: nextDate } }),
         Lead.countDocuments({ ...filter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: date, $lt: nextDate } }),
         CallLog.countDocuments({ userId: req.user.userId, deletedAt: null, createdAt: { $gte: date, $lt: nextDate } })
       ]);
-      
+
       dailyTrends.push({
         date: date.toISOString().split('T')[0],
         leads: dayLeads,
