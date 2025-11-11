@@ -867,7 +867,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
         // Total leads
         Lead.countDocuments({ ...baseLeadFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) }),
         Lead.countDocuments({ ...baseLeadFilter, createdAt: mtdFilter }),
-        Lead.countDocuments({ ...baseLeadFilter, createdAt: { $gte: startOfToday, $lte: endOfToday} }),
+        Lead.countDocuments({ ...baseLeadFilter, createdAt: { $gte: startOfToday, $lte: endOfToday } }),
         // Qualified leads
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) }),
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: qualifiedMtdFilter }),
