@@ -738,17 +738,24 @@ router.get('/sales', authenticateToken, async (req, res) => {
 router.get('/admin', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
-    if (!['admin', 'marketing'].includes(user?.roleId?.slug)) {
+    const userRole = user?.roleId?.slug;
+    if (!['admin', 'marketing', 'presales_agent'].includes(userRole)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const { userType, agentId, startDate, endDate, sourceId } = req.query;
+    let { userType, agentId, startDate, endDate, sourceId } = req.query;
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfToday = new Date();
     startOfToday.setHours(5, 30, 0, 0);
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
+
+    // Auto-set filters for presales agents
+    if (userRole === 'presales_agent') {
+      userType = 'presales';
+      agentId = req.user.userId;
+    }
 
     // Build filters
     const leadFilter = { deletedAt: null };
@@ -1281,7 +1288,8 @@ router.get('/admin', authenticateToken, async (req, res) => {
       sourceLeads, sourceQualified, sourceWon,
       // Agent-specific charts
       dailyQualificationRate, dailyCallsPerLead,
-      role: 'admin'
+      role: userRole === 'presales_agent' ? 'presales_agent' : 'admin',
+      showFilters: userRole !== 'presales_agent'
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch admin dashboard' });
@@ -1292,9 +1300,9 @@ router.get('/admin', authenticateToken, async (req, res) => {
 router.get('/admin/sources', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
-    if (!['admin', 'marketing'].includes(user?.roleId?.slug)) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    // if (!['admin', 'marketing'].includes(user?.roleId?.slug)) {
+    //   return res.status(403).json({ error: 'Access denied' });
+    // }
 
     const LeadSource = require('../models/LeadSource');
     const sources = await LeadSource.find({ deletedAt: null }).select('_id name').sort({ name: 1 });
@@ -1308,9 +1316,9 @@ router.get('/admin/sources', authenticateToken, async (req, res) => {
 router.get('/admin/users/:type', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
-    if (!['admin', 'marketing'].includes(user?.roleId?.slug)) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    // if (!['admin', 'marketing'].includes(user?.roleId?.slug)) {
+    //   return res.status(403).json({ error: 'Access denied' });
+    // }
 
     const { type } = req.params;
     let roleFilter = {};
@@ -1333,90 +1341,9 @@ router.get('/admin/users/:type', authenticateToken, async (req, res) => {
   }
 });
 
-// Presales dashboard
-router.get('/presales', authenticateToken, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId).populate('roleId');
-    const userRole = user?.roleId?.slug;
 
-    if (!['presales_agent', 'hod_presales', 'manager_presales'].includes(userRole)) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
 
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
 
-    const filter = { deletedAt: null };
-    if (userRole === 'presales_agent') {
-      filter.presalesUserId = req.user.userId;
-    }
-
-    const [leadStatus, qualifiedStatus, lostStatus] = await Promise.all([
-      Status.findOne({ slug: 'lead', type: 'leadStatus' }),
-      Status.findOne({ slug: 'qualified', type: 'leadStatus' }),
-      Status.findOne({ slug: 'lost', type: 'leadStatus' })
-    ]);
-
-    const [totalLeads, leadsToday, leadsMTD, qualified, qualifiedToday, qualifiedMTD, lost, lostToday, lostMTD, calls, callsToday, callsMTD] = await Promise.all([
-      Lead.countDocuments(filter),
-      Lead.countDocuments({ ...filter, createdAt: { $gte: startOfToday } }),
-      Lead.countDocuments({ ...filter, createdAt: { $gte: startOfMonth } }),
-      Lead.countDocuments({ ...filter, leadStatusId: qualifiedStatus?._id }),
-      Lead.countDocuments({ ...filter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday } }),
-      Lead.countDocuments({ ...filter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfMonth } }),
-      Lead.countDocuments({ ...filter, leadStatusId: lostStatus?._id }),
-      Lead.countDocuments({ ...filter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfToday } }),
-      Lead.countDocuments({ ...filter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfMonth } }),
-      CallLog.countDocuments({ userId: req.user.userId, deletedAt: null }),
-      CallLog.countDocuments({ userId: req.user.userId, deletedAt: null, createdAt: { $gte: startOfToday } }),
-      CallLog.countDocuments({ userId: req.user.userId, deletedAt: null, createdAt: { $gte: startOfMonth } })
-    ]);
-
-    const dailyTrends = [];
-    for (let i = 29; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      date.setHours(0, 0, 0, 0);
-      const nextDate = new Date(date);
-      nextDate.setDate(nextDate.getDate() + 1);
-
-      const [dayLeads, dayQualified, dayLost, dayCalls] = await Promise.all([
-        Lead.countDocuments({ ...filter, createdAt: { $gte: date, $lt: nextDate } }),
-        Lead.countDocuments({ ...filter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: date, $lt: nextDate } }),
-        Lead.countDocuments({ ...filter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: date, $lt: nextDate } }),
-        CallLog.countDocuments({ userId: req.user.userId, deletedAt: null, createdAt: { $gte: date, $lt: nextDate } })
-      ]);
-
-      dailyTrends.push({
-        date: date.toISOString().split('T')[0],
-        leads: dayLeads,
-        qualified: dayQualified,
-        lost: dayLost,
-        calls: dayCalls
-      });
-    }
-
-    const sourceDistribution = await Lead.aggregate([
-      { $match: filter },
-      { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
-      { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
-      { $group: { _id: '$sourceName', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
-    ]);
-
-    const conversionRate = totalLeads > 0 ? ((qualified / totalLeads) * 100).toFixed(2) : 0;
-
-    res.json({
-      totalLeads, leadsToday, leadsMTD, qualified, qualifiedToday, qualifiedMTD,
-      lost, lostToday, lostMTD, calls, callsToday, callsMTD,
-      dailyTrends, sourceDistribution, conversionRate, role: 'presales'
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch presales dashboard' });
-  }
-});
 
 // Marketing dashboard
 router.get('/marketing', authenticateToken, async (req, res) => {
