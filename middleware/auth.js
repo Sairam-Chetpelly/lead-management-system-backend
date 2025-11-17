@@ -21,9 +21,9 @@ const authenticateToken = async (req, res, next) => {
       return res.status(401).json({ error: 'User not found.' });
     }
     
-    if (user.statusId.slug !== 'active') {
-      return res.status(403).json({ error: 'Account is inactive. Access denied.' });
-    }
+    // if (user.statusId.slug !== 'active') {
+    //   return res.status(403).json({ error: 'Account is inactive. Access denied.' });
+    // }
     
     req.user = {
       userId: user._id,

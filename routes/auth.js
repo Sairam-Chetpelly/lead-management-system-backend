@@ -27,9 +27,9 @@ router.post('/login', [
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    if (user.statusId.slug !== 'active') {
-      return res.status(401).json({ error: 'Account is not active' });
-    }
+    // if (user.statusId.slug !== 'active') {
+    //   return res.status(401).json({ error: 'Account is not active' });
+    // }
 
     const expiresIn = '24h';
     const token = jwt.sign(
