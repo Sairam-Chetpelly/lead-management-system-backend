@@ -21,6 +21,7 @@ const GoogleAdsHistory = require('../models/GoogleAdsHistory');
 const { authenticateToken } = require('../middleware/auth');
 const { refreshMetaToken, getCurrentToken } = require('../utils/metaTokenRefresh');
 const { sendPreCreationEmail, sendPostCreationEmail, sendMetaErrorEmail, sendApuTirggerEmail, sendLeadgenEmail, sendPlatFormEmail, sendgraphResponseEmail } = require('../utils/metaEmailService');
+const whatsappService = require('../utils/whatsappService');
 
 // Email configuration
 const transporter = nodemailer.createTransport({
@@ -167,6 +168,15 @@ async function getNextSalesAgent(centreId, languageId) {
   salesRoundRobin[centerKey]++;
 
   return agent;
+}
+
+// Helper function to send WhatsApp notification for lead assignment
+async function sendLeadAssignmentNotification(salesAgent, lead) {
+  try {
+    await whatsappService.sendLeadAssignmentNotification(salesAgent, lead);
+  } catch (error) {
+    console.error('Failed to send WhatsApp notification:', error);
+  }
 }
 
 // Get unsigned leads (must be before parameterized routes)
@@ -332,8 +342,8 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Populate the response
     await lead.populate([
-      { path: 'presalesUserId', select: 'name email' },
-      { path: 'salesUserId', select: 'name email' },
+      { path: 'presalesUserId', select: 'name email mobileNumber' },
+      { path: 'salesUserId', select: 'name email mobileNumber' },
       { path: 'languageId', select: 'name' },
       { path: 'sourceId', select: 'name' },
       { path: 'projectTypeId', select: 'name type' },
@@ -342,6 +352,12 @@ router.post('/', authenticateToken, async (req, res) => {
       { path: 'leadStatusId', select: 'name slug' },
       { path: 'leadSubStatusId', select: 'name slug' }
     ]);
+
+    // Send WhatsApp notification if assigned to sales agent
+    if (assignmentType === 'sales' && lead.salesUserId) {
+      // console.log('Sending WhatsApp notification to sales agent...', lead.salesUserId, lead);
+      await sendLeadAssignmentNotification(lead.salesUserId, lead);
+    }
 
     res.status(201).json({
       message: 'Lead created successfully',
@@ -531,6 +547,11 @@ router.post('/bulk-upload-sales', authenticateToken, csvUpload.single('file'), a
           ...leadData
         });
         await leadActivity.save();
+
+        // Send WhatsApp notification to sales agent
+        if (salesPerson && leadData.salesUserId) {
+          await sendLeadAssignmentNotification(salesPerson, lead);
+        }
 
         results.push({
           row: rowNumber,
@@ -1139,8 +1160,8 @@ router.get('/', authenticateToken, async (req, res) => {
     const [leads, total] = await Promise.all([
       Lead.find(filter)
         .populate([
-          { path: 'presalesUserId', select: 'name email' },
-          { path: 'salesUserId', select: 'name email' },
+          { path: 'presalesUserId', select: 'name email mobileNumber' },
+          { path: 'salesUserId', select: 'name email mobileNumber' },
           { path: 'languageId', select: 'name' },
           { path: 'sourceId', select: 'name' },
           { path: 'projectTypeId', select: 'name type' },
@@ -1354,8 +1375,8 @@ router.get('/export', authenticateToken, async (req, res) => {
 
     const leads = await Lead.find(filter)
       .populate([
-        { path: 'presalesUserId', select: 'name email' },
-        { path: 'salesUserId', select: 'name email' },
+        { path: 'presalesUserId', select: 'name email mobileNumber' },
+        { path: 'salesUserId', select: 'name email mobileNumber' },
         { path: 'updatedPerson', select: 'name email' },
         { path: 'languageId', select: 'name' },
         { path: 'sourceId', select: 'name' },
@@ -1439,8 +1460,8 @@ router.get('/:id/activities', authenticateToken, async (req, res) => {
     // Get all lead activities for this lead
     const leadActivities = await LeadActivity.find({ leadId: req.params.id, deletedAt: null })
       .populate([
-        { path: 'presalesUserId', select: 'name email' },
-        { path: 'salesUserId', select: 'name email' },
+        { path: 'presalesUserId', select: 'name email mobileNumber' },
+        { path: 'salesUserId', select: 'name email mobileNumber' },
         { path: 'updatedPerson', select: 'name email' },
         { path: 'languageId', select: 'name' },
         { path: 'sourceId', select: 'name' },
@@ -1469,8 +1490,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
     // Find the lead
     const lead = await Lead.findById(req.params.id)
       .populate([
-        { path: 'presalesUserId', select: 'name email' },
-        { path: 'salesUserId', select: 'name email' },
+        { path: 'presalesUserId', select: 'name email mobileNumber' },
+        { path: 'salesUserId', select: 'name email mobileNumber' },
         { path: 'updatedPerson', select: 'name email' },
         { path: 'languageId', select: 'name' },
         { path: 'sourceId', select: 'name' },
@@ -1738,6 +1759,10 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
       }));
     }
 
+    // Store original status for notification check
+    const originalLeadStatusId = lead.leadStatusId?.toString();
+    const originalSalesUserId = lead.salesUserId?.toString();
+
     // Check if lead status changed
     if (req.body.leadStatusId && req.body.leadStatusId !== lead.leadStatusId?.toString()) {
       const leadStatus = await Status.findById(req.body.leadStatusId);
@@ -1790,8 +1815,8 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
 
     // Populate the response
     await lead.populate([
-      { path: 'presalesUserId', select: 'name email' },
-      { path: 'salesUserId', select: 'name email' },
+      { path: 'presalesUserId', select: 'name email mobileNumber' },
+      { path: 'salesUserId', select: 'name email mobileNumber' },
       { path: 'updatedPerson', select: 'name email' },
       { path: 'languageId', select: 'name' },
       { path: 'sourceId', select: 'name' },
@@ -1803,6 +1828,19 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
     ]);
 
     console.log('Lead updated successfully');
+
+    // Send WhatsApp notification when:
+    // 1. Status changes to qualified AND sales agent exists
+    // 2. Lead already qualified but sales agent changes
+    const statusChangedToQualified = req.body.leadStatusId && req.body.leadStatusId !== originalLeadStatusId;
+    const salesAgentChanged = updatedData.salesUserId && updatedData.salesUserId?.toString() !== originalSalesUserId;
+    const currentStatus = await Status.findById(lead.leadStatusId);
+    
+    if (lead.salesUserId && currentStatus?.slug === 'qualified') {
+      if (statusChangedToQualified || salesAgentChanged) {
+        await sendLeadAssignmentNotification(lead.salesUserId, lead);
+      }
+    }
 
     res.status(200).json({
       message: 'Lead updated successfully',
@@ -1905,6 +1943,10 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       }));
     }
 
+    // Store original status for notification check
+    const originalLeadStatusId = lead.leadStatusId?.toString();
+    const originalSalesUserId = lead.salesUserId?.toString();
+
     // Check if lead status changed and handle accordingly
     if (req.body.leadStatusId && req.body.leadStatusId !== lead.leadStatusId?.toString()) {
       const leadStatus = await Status.findById(req.body.leadStatusId);
@@ -1954,8 +1996,8 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
 
     // Populate the response
     await lead.populate([
-      { path: 'presalesUserId', select: 'name email' },
-      { path: 'salesUserId', select: 'name email' },
+      { path: 'presalesUserId', select: 'name email mobileNumber' },
+      { path: 'salesUserId', select: 'name email mobileNumber' },
       { path: 'updatedPerson', select: 'name email' },
       { path: 'languageId', select: 'name' },
       { path: 'sourceId', select: 'name' },
@@ -1965,6 +2007,19 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       { path: 'leadStatusId', select: 'name slug' },
       { path: 'leadSubStatusId', select: 'name slug' }
     ]);
+
+    // Send WhatsApp notification when:
+    // 1. Status changes to qualified AND sales agent exists
+    // 2. Lead already qualified but sales agent changes
+    const statusChangedToQualified = req.body.leadStatusId && req.body.leadStatusId !== originalLeadStatusId;
+    const salesAgentChanged = req.body.salesUserId && req.body.salesUserId !== originalSalesUserId;
+    const currentStatus = await Status.findById(lead.leadStatusId);
+    
+    if (lead.salesUserId && currentStatus?.slug === 'qualified') {
+      if (statusChangedToQualified || salesAgentChanged) {
+        await sendLeadAssignmentNotification(lead.salesUserId, lead);
+      }
+    }
 
     res.status(200).json({
       message: 'Lead updated successfully',
@@ -2037,8 +2092,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
     // Populate the response
     await lead.populate([
-      { path: 'presalesUserId', select: 'name email' },
-      { path: 'salesUserId', select: 'name email' },
+      { path: 'presalesUserId', select: 'name email mobileNumber' },
+      { path: 'salesUserId', select: 'name email mobileNumber' },
       { path: 'languageId', select: 'name' },
       { path: 'sourceId', select: 'name' },
       { path: 'projectTypeId', select: 'name type' },
@@ -2099,9 +2154,17 @@ router.post('/:id/assign', authenticateToken, async (req, res) => {
     await lead.save();
 
     await lead.populate([
-      { path: 'presalesUserId', select: 'name email' },
-      { path: 'salesUserId', select: 'name email' }
+      { path: 'presalesUserId', select: 'name email mobileNumber' },
+      { path: 'salesUserId', select: 'name email mobileNumber' }
     ]);
+
+    // Store original sales agent before update
+    const originalSalesUserId = lead.salesUserId?.toString();
+    
+    // Send WhatsApp notification only if newly assigned to sales agent
+    if (salesUserId && lead.salesUserId && salesUserId !== originalSalesUserId) {
+      await sendLeadAssignmentNotification(lead.salesUserId, lead);
+    }
 
     res.json({ message: 'Lead assigned successfully', lead });
   } catch (error) {
@@ -2190,8 +2253,8 @@ router.post('/:id/change-language', authenticateToken, async (req, res) => {
     await lead.save();
 
     await lead.populate([
-      { path: 'presalesUserId', select: 'name email' },
-      { path: 'salesUserId', select: 'name email' },
+      { path: 'presalesUserId', select: 'name email mobileNumber' },
+      { path: 'salesUserId', select: 'name email mobileNumber' },
       { path: 'languageId', select: 'name' },
       { path: 'sourceId', select: 'name' },
       { path: 'projectTypeId', select: 'name type' },
