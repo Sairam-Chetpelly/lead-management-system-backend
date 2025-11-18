@@ -748,13 +748,18 @@ router.get('/admin', authenticateToken, async (req, res) => {
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
 
-    // Auto-set filters for presales agents
+    // Auto-set filters for different user roles
     if (userRole === 'presales_agent') {
       userType = 'presales';
       agentId = req.user.userId;
-    } else if (userRole === 'sales') {
+    } else if (userRole === 'manager_presales' || userRole === 'hod_presales') {
+      userType = 'presales';
+      // Don't set agentId - show all presales leads by default
+    } else if (userRole === 'sales_agent') {
       userType = 'sales';
       agentId = req.user.userId;
+    } else if (userRole === 'sales_manager' || userRole === 'hod_sales') {
+      userType = 'sales';
     }
 
     // Build filters
@@ -1007,7 +1012,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
       sourceLeads, sourceQualified, sourceWon,
       // Agent-specific charts
       dailyQualificationRate, dailyCallsPerLead,
-      role: userRole === 'presales_agent' ? 'presales_agent' : 'admin',
+      role: userRole,
       showFilters: userRole !== 'presales_agent'
     });
   } catch (error) {
@@ -1031,10 +1036,13 @@ router.get('/admin/old', authenticateToken, async (req, res) => {
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
 
-    // Auto-set filters for presales agents
+    // Auto-set filters for different user roles
     if (userRole === 'presales_agent') {
       userType = 'presales';
       agentId = req.user.userId;
+    } else if (userRole === 'manager_presales' || userRole === 'hod_presales') {
+      userType = 'presales';
+      // Don't set agentId - show all presales leads by default
     } else if (userRole === 'sales_agent') {
       userType = 'sales';
       agentId = req.user.userId;
