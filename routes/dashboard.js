@@ -739,9 +739,6 @@ router.get('/admin', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
-    if (!['admin', 'marketing', 'presales_agent'].includes(userRole)) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
 
     let { userType, agentId, startDate, endDate, sourceId } = req.query;
     const now = new Date();
@@ -754,6 +751,292 @@ router.get('/admin', authenticateToken, async (req, res) => {
     // Auto-set filters for presales agents
     if (userRole === 'presales_agent') {
       userType = 'presales';
+      agentId = req.user.userId;
+    } else if (userRole === 'sales') {
+      userType = 'sales';
+      agentId = req.user.userId;
+    }
+
+    // Build filters
+    const leadFilter = { deletedAt: null };
+    const callFilter = { deletedAt: null };
+
+    // Apply agent filter
+    if (agentId && agentId !== 'all') {
+      if (userType === 'sales') {
+        leadFilter.salesUserId = new mongoose.Types.ObjectId(agentId);
+      } else if (userType === 'presales') {
+        leadFilter.presalesUserId = new mongoose.Types.ObjectId(agentId);
+      } else {
+        leadFilter.$or = [{ salesUserId: agentId }, { presalesUserId: agentId }];
+      }
+      callFilter.userId = new mongoose.Types.ObjectId(agentId);
+    }
+
+    // Apply source filter
+    if (sourceId && sourceId !== 'all') {
+      leadFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
+    }
+    // Apply date filter
+    const dateFilter = {};
+    if (startDate && endDate) {
+      dateFilter.$gte = new Date(startDate);
+      dateFilter.$lte = new Date(endDate);
+    }
+    const [qualifiedStatus, lostStatus, wonStatus] = await Promise.all([
+      Status.findOne({ slug: 'qualified', type: 'leadStatus' }),
+      Status.findOne({ slug: 'lost', type: 'leadStatus' }),
+      Status.findOne({ slug: 'won', type: 'leadStatus' })
+    ]);
+
+    // Build date filters
+    let createdAtFilter = {};
+    if (startDate && endDate) {
+      createdAtFilter = {
+        $gte: new Date(startDate),
+        $lte: (() => {
+          const toDate = new Date(endDate);
+          toDate.setHours(23, 59, 59, 999);
+          return toDate;
+        })()
+      };
+    }
+
+    const mtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
+    const qualifiedMtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
+    const lostMtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
+    const wonMtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
+
+    // Build lost filter based on user type
+    const getLostFilter = (dateFilter = {}) => {
+      const lostFilter = { ...leadFilter, leadStatusId: lostStatus?._id, ...dateFilter };
+      if (userType === 'presales') {
+        lostFilter.qualifiedDate = null;
+      }
+      return lostFilter;
+    };
+
+    // Get all counts using Lead table only
+    const [totalLeads, leadsMTD, leadsToday, totalQualified, qualifiedMTD, qualifiedToday, totalLost, lostMTD, lostToday, totalWon, wonMTD, wonToday] = await Promise.all([
+      // Total leads
+      Lead.countDocuments({ ...leadFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, createdAt: mtdFilter }),
+      Lead.countDocuments({ ...leadFilter, createdAt: { $gte: startOfToday, $lte: endOfToday } }),
+      // Qualified leads
+      Lead.countDocuments({ ...leadFilter, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: qualifiedMtdFilter }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday, $lte: endOfToday } }),
+      // Lost leads (with qualifiedDate null condition for presales)
+      Lead.countDocuments(getLostFilter(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {})),
+      Lead.countDocuments(getLostFilter({ leadLostDate: lostMtdFilter })),
+      Lead.countDocuments(getLostFilter({ leadLostDate: { $gte: startOfToday, $lte: endOfToday } })),
+      // Won leads
+      Lead.countDocuments({ ...leadFilter, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: wonStatus?._id, leadWonDate: wonMtdFilter }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: wonStatus?._id, leadWonDate: { $gte: startOfToday, $lte: endOfToday } })
+    ]);
+
+    // Get call counts
+    const [totalCalls, callsMTD, callsToday] = await Promise.all([
+      CallLog.countDocuments({ ...callFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) }),
+      CallLog.countDocuments({ ...callFilter, createdAt: mtdFilter }),
+      CallLog.countDocuments({ ...callFilter, createdAt: { $gte: startOfToday, $lte: endOfToday } })
+    ]);
+
+    // Daily trends using aggregation for better performance
+    let chartStartDate, chartEndDate;
+    if (startDate && endDate) {
+      chartStartDate = new Date(startDate);
+      chartEndDate = new Date(endDate);
+    } else {
+      chartEndDate = new Date();
+      chartStartDate = new Date();
+      chartStartDate.setDate(chartStartDate.getDate() - 29);
+    }
+
+    // Use aggregation for daily trends
+    const [leadTrends, callTrends, qualifiedTrends, lostTrends, wonTrends] = await Promise.all([
+      Lead.aggregate([
+        { $match: { ...leadFilter, createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      CallLog.aggregate([
+        { $match: { ...callFilter, createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$qualifiedDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([
+        { $match: getLostFilter({ leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } }) },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadLostDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, leadStatusId: wonStatus?._id, leadWonDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadWonDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ])
+    ]);
+
+    // Convert to arrays with all dates
+    const dateRange = [];
+    const currentDate = new Date(chartStartDate);
+    while (currentDate <= chartEndDate) {
+      dateRange.push(currentDate.toISOString().split('T')[0]);
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    const dailyLeads = dateRange.map(date => ({ date, count: leadTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyCalls = dateRange.map(date => ({ date, count: callTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyQualified = dateRange.map(date => ({ date, count: qualifiedTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyLost = dateRange.map(date => ({ date, count: lostTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyWon = dateRange.map(date => ({ date, count: wonTrends.find(t => t._id === date)?.count || 0 }));
+
+    // Source-wise data using Lead table
+    const [sourceLeads, sourceQualified, sourceWon] = await Promise.all([
+      Lead.aggregate([
+        { $match: leadFilter },
+        { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, leadStatusId: qualifiedStatus?._id } },
+        { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, leadStatusId: wonStatus?._id } },
+        { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ])
+    ]);
+
+    // Visit and meeting data
+    const [siteVisits, centerVisits, virtualMeetings] = await Promise.all([
+      Lead.countDocuments({ ...leadFilter, siteVisit: true }),
+      Lead.countDocuments({ ...leadFilter, centerVisit: true }),
+      Lead.countDocuments({ ...leadFilter, virtualMeeting: true })
+    ]);
+
+    // Daily visit and meeting trends using aggregation
+    const [siteVisitTrends, centerVisitTrends, virtualMeetingTrends] = await Promise.all([
+      Lead.aggregate([
+        { $match: { ...leadFilter, siteVisit: true, siteVisitCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$siteVisitCompletedDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, centerVisit: true, centerVisitCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$centerVisitCompletedDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, virtualMeeting: true, virtualMeetingCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$virtualMeetingCompletedDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ])
+    ]);
+
+    const dailySiteVisits = dateRange.map(date => ({ date, count: siteVisitTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyCenterVisits = dateRange.map(date => ({ date, count: centerVisitTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyVirtualMeetings = dateRange.map(date => ({ date, count: virtualMeetingTrends.find(t => t._id === date)?.count || 0 }));
+
+    // Additional charts for agent filters
+    let dailyQualificationRate = [], dailyCallsPerLead = [];
+
+    if (userType === 'presales' || userType === 'sales') {
+      // Get daily data for qualification rate and calls per lead
+      const [dailyLeadAllocations, dailyQualifications, dailyCallCounts] = await Promise.all([
+        Lead.aggregate([
+          { $match: { ...leadFilter, createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+          { $sort: { _id: 1 } }
+        ]),
+        Lead.aggregate([
+          { $match: { ...leadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$qualifiedDate" } }, count: { $sum: 1 } } },
+          { $sort: { _id: 1 } }
+        ]),
+        CallLog.aggregate([
+          { $match: { ...callFilter, createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+          { $sort: { _id: 1 } }
+        ])
+      ]);
+
+      // Calculate daily qualification rate (qualified/allocated)
+      dailyQualificationRate = dateRange.map(date => {
+        const allocated = dailyLeadAllocations.find(t => t._id === date)?.count || 0;
+        const qualified = dailyQualifications.find(t => t._id === date)?.count || 0;
+        const rate = allocated > 0 ? ((qualified / allocated) * 100).toFixed(2) : 0;
+        return { date, rate: parseFloat(rate), allocated, qualified };
+      });
+
+      // Calculate daily calls per lead (calls/allocated)
+      dailyCallsPerLead = dateRange.map(date => {
+        const allocated = dailyLeadAllocations.find(t => t._id === date)?.count || 0;
+        const calls = dailyCallCounts.find(t => t._id === date)?.count || 0;
+        const ratio = allocated > 0 ? (calls / allocated).toFixed(2) : 0;
+        return { date, ratio: parseFloat(ratio), calls, allocated };
+      });
+    }
+
+    res.json({
+      // Card metrics
+      totalLeads, leadsMTD, leadsToday,
+      totalCalls, callsMTD, callsToday,
+      totalQualified, qualifiedMTD, qualifiedToday,
+      totalLost, lostMTD, lostToday,
+      totalWon, wonMTD, wonToday,
+      // Visit and meeting metrics
+      siteVisits, centerVisits, virtualMeetings,
+      // Charts data
+      dailyLeads, dailyCalls, dailyQualified, dailyLost, dailyWon,
+      dailySiteVisits, dailyCenterVisits, dailyVirtualMeetings,
+      sourceLeads, sourceQualified, sourceWon,
+      // Agent-specific charts
+      dailyQualificationRate, dailyCallsPerLead,
+      role: userRole === 'presales_agent' ? 'presales_agent' : 'admin',
+      showFilters: userRole !== 'presales_agent'
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch admin dashboard' });
+  }
+});
+
+router.get('/admin/old', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+    // if (!['admin', 'marketing', 'presales_agent'].includes(userRole)) {
+    //   return res.status(403).json({ error: 'Access denied' });
+    // }
+
+    let { userType, agentId, startDate, endDate, sourceId } = req.query;
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfToday = new Date();
+    startOfToday.setHours(5, 30, 0, 0);
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    // Auto-set filters for presales agents
+    if (userRole === 'presales_agent') {
+      userType = 'presales';
+      agentId = req.user.userId;
+    } else if (userRole === 'sales_agent') {
+      userType = 'sales';
       agentId = req.user.userId;
     }
 
@@ -853,10 +1136,25 @@ router.get('/admin', authenticateToken, async (req, res) => {
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) }),
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: qualifiedStatus?._id, qualifiedDate: qualifiedMtdFilter }),
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday, $lte: endOfToday } }),
-          // Lost leads - current status of assigned leads
-          Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: lostStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) }),
-          Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: lostStatus?._id, leadLostDate: lostMtdFilter }),
-          Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfToday, $lte: endOfToday } }),
+          // Lost leads - current status of assigned leads (with qualifiedDate null for presales)
+          Lead.countDocuments({ 
+            _id: { $in: assignedLeadIds }, 
+            leadStatusId: lostStatus?._id, 
+            ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+            ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) 
+          }),
+          Lead.countDocuments({ 
+            _id: { $in: assignedLeadIds }, 
+            leadStatusId: lostStatus?._id, 
+            ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+            leadLostDate: lostMtdFilter 
+          }),
+          Lead.countDocuments({ 
+            _id: { $in: assignedLeadIds }, 
+            leadStatusId: lostStatus?._id, 
+            ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+            leadLostDate: { $gte: startOfToday, $lte: endOfToday } 
+          }),
           // Won leads - current status of assigned leads
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) }),
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: wonStatus?._id, leadWonDate: wonMtdFilter }),
@@ -879,10 +1177,25 @@ router.get('/admin', authenticateToken, async (req, res) => {
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) }),
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: qualifiedMtdFilter }),
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday, $lte: endOfToday } }),
-        // Lost leads
-        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: lostStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) }),
-        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: lostStatus?._id, leadLostDate: lostMtdFilter }),
-        Lead.countDocuments({ ...baseLeadFilter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: startOfToday, $lte: endOfToday } }),
+        // Lost leads (with qualifiedDate null for presales)
+        Lead.countDocuments({ 
+          ...baseLeadFilter, 
+          leadStatusId: lostStatus?._id, 
+          ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+          ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) 
+        }),
+        Lead.countDocuments({ 
+          ...baseLeadFilter, 
+          leadStatusId: lostStatus?._id, 
+          ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+          leadLostDate: lostMtdFilter 
+        }),
+        Lead.countDocuments({ 
+          ...baseLeadFilter, 
+          leadStatusId: lostStatus?._id, 
+          ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+          leadLostDate: { $gte: startOfToday, $lte: endOfToday } 
+        }),
         // Won leads
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) }),
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: wonStatus?._id, leadWonDate: wonMtdFilter }),
@@ -939,7 +1252,12 @@ router.get('/admin', authenticateToken, async (req, res) => {
           { $sort: { _id: 1 } }
         ]) : [],
         assignedLeadIds.length > 0 ? Lead.aggregate([
-          { $match: { ...leadMatchFilter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $match: { 
+            ...leadMatchFilter, 
+            leadStatusId: lostStatus?._id, 
+            ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+            leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } 
+          } },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadLostDate" } }, count: { $sum: 1 } } },
           { $sort: { _id: 1 } }
         ]) : [],
@@ -983,7 +1301,12 @@ router.get('/admin', authenticateToken, async (req, res) => {
           { $sort: { _id: 1 } }
         ]),
         Lead.aggregate([
-          { $match: { ...baseLeadFilter, leadStatusId: lostStatus?._id, leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $match: { 
+            ...baseLeadFilter, 
+            leadStatusId: lostStatus?._id, 
+            ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+            leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } 
+          } },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadLostDate" } }, count: { $sum: 1 } } },
           { $sort: { _id: 1 } }
         ]),
