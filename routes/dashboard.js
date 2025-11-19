@@ -740,7 +740,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
 
-    let { userType, agentId, startDate, endDate, sourceId } = req.query;
+    let { userType, agentId, startDate, endDate, sourceId, centreId } = req.query;
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfToday = new Date();
@@ -765,6 +765,60 @@ router.get('/admin', authenticateToken, async (req, res) => {
     // Build filters
     const leadFilter = { deletedAt: null };
     const callFilter = { deletedAt: null };
+    
+    // Apply centre filter for sales_manager and hod_sales
+    if (userRole === 'sales_manager' && user.centreId) {
+      leadFilter.centreId = user.centreId;
+    } else if (userRole === 'hod_sales') {
+      if (centreId && centreId !== 'all') {
+        leadFilter.centreId = new mongoose.Types.ObjectId(centreId);
+      }
+      // If no centreId provided, show all data (no filter applied)
+    }
+    
+    // For call counts, filter by user type when not filtering by specific agent
+    if (!agentId || agentId === 'all') {
+      if (userType === 'sales') {
+        const salesRoleIds = await Role.find({ 
+          slug: { $in: ['sales_agent', 'sales_manager', 'hod_sales'] } 
+        }).distinct('_id');
+        
+        if (salesRoleIds.length > 0) {
+          const salesUserQuery = { 
+            roleId: { $in: salesRoleIds },
+            deletedAt: null 
+          };
+          
+          // Filter by centre for sales_manager and hod_sales
+          if (userRole === 'sales_manager' && user.centreId) {
+            salesUserQuery.centreId = user.centreId;
+          } else if (userRole === 'hod_sales' && centreId && centreId !== 'all') {
+            salesUserQuery.centreId = new mongoose.Types.ObjectId(centreId);
+          }
+          
+          const salesUserIds = await User.find(salesUserQuery).distinct('_id');
+          
+          if (salesUserIds.length > 0) {
+            callFilter.userId = { $in: salesUserIds };
+          }
+        }
+      } else if (userType === 'presales') {
+        const presalesRoleIds = await Role.find({ 
+          slug: { $in: ['presales_agent', 'manager_presales', 'hod_presales'] } 
+        }).distinct('_id');
+        
+        if (presalesRoleIds.length > 0) {
+          const presalesUserIds = await User.find({ 
+            roleId: { $in: presalesRoleIds },
+            deletedAt: null 
+          }).distinct('_id');
+          
+          if (presalesUserIds.length > 0) {
+            callFilter.userId = { $in: presalesUserIds };
+          }
+        }
+      }
+    }
 
     // Apply agent filter
     if (agentId && agentId !== 'all') {
@@ -817,6 +871,8 @@ router.get('/admin', authenticateToken, async (req, res) => {
       const lostFilter = { ...leadFilter, leadStatusId: lostStatus?._id, ...dateFilter };
       if (userType === 'presales') {
         lostFilter.qualifiedDate = null;
+      } else if (userType === 'sales') {
+        lostFilter.qualifiedDate = { $ne: null };
       }
       return lostFilter;
     };
@@ -1144,23 +1200,23 @@ router.get('/admin/old', authenticateToken, async (req, res) => {
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) }),
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: qualifiedStatus?._id, qualifiedDate: qualifiedMtdFilter }),
           Lead.countDocuments({ _id: { $in: assignedLeadIds }, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday, $lte: endOfToday } }),
-          // Lost leads - current status of assigned leads (with qualifiedDate null for presales)
+          // Lost leads - current status of assigned leads (with qualifiedDate conditions)
           Lead.countDocuments({ 
             _id: { $in: assignedLeadIds }, 
             leadStatusId: lostStatus?._id, 
-            ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+            ...(userType === 'presales' ? { qualifiedDate: null } : userType === 'sales' ? { qualifiedDate: { $ne: null } } : {}),
             ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) 
           }),
           Lead.countDocuments({ 
             _id: { $in: assignedLeadIds }, 
             leadStatusId: lostStatus?._id, 
-            ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+            ...(userType === 'presales' ? { qualifiedDate: null } : userType === 'sales' ? { qualifiedDate: { $ne: null } } : {}),
             leadLostDate: lostMtdFilter 
           }),
           Lead.countDocuments({ 
             _id: { $in: assignedLeadIds }, 
             leadStatusId: lostStatus?._id, 
-            ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+            ...(userType === 'presales' ? { qualifiedDate: null } : userType === 'sales' ? { qualifiedDate: { $ne: null } } : {}),
             leadLostDate: { $gte: startOfToday, $lte: endOfToday } 
           }),
           // Won leads - current status of assigned leads
@@ -1185,23 +1241,23 @@ router.get('/admin/old', authenticateToken, async (req, res) => {
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) }),
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: qualifiedMtdFilter }),
         Lead.countDocuments({ ...baseLeadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday, $lte: endOfToday } }),
-        // Lost leads (with qualifiedDate null for presales)
+        // Lost leads (with qualifiedDate conditions)
         Lead.countDocuments({ 
           ...baseLeadFilter, 
           leadStatusId: lostStatus?._id, 
-          ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+          ...(userType === 'presales' ? { qualifiedDate: null } : userType === 'sales' ? { qualifiedDate: { $ne: null } } : {}),
           ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) 
         }),
         Lead.countDocuments({ 
           ...baseLeadFilter, 
           leadStatusId: lostStatus?._id, 
-          ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+          ...(userType === 'presales' ? { qualifiedDate: null } : userType === 'sales' ? { qualifiedDate: { $ne: null } } : {}),
           leadLostDate: lostMtdFilter 
         }),
         Lead.countDocuments({ 
           ...baseLeadFilter, 
           leadStatusId: lostStatus?._id, 
-          ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+          ...(userType === 'presales' ? { qualifiedDate: null } : userType === 'sales' ? { qualifiedDate: { $ne: null } } : {}),
           leadLostDate: { $gte: startOfToday, $lte: endOfToday } 
         }),
         // Won leads
@@ -1263,7 +1319,7 @@ router.get('/admin/old', authenticateToken, async (req, res) => {
           { $match: { 
             ...leadMatchFilter, 
             leadStatusId: lostStatus?._id, 
-            ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+            ...(userType === 'presales' ? { qualifiedDate: null } : userType === 'sales' ? { qualifiedDate: { $ne: null } } : {}),
             leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } 
           } },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadLostDate" } }, count: { $sum: 1 } } },
@@ -1312,7 +1368,7 @@ router.get('/admin/old', authenticateToken, async (req, res) => {
           { $match: { 
             ...baseLeadFilter, 
             leadStatusId: lostStatus?._id, 
-            ...(userType === 'presales' ? { qualifiedDate: null } : {}),
+            ...(userType === 'presales' ? { qualifiedDate: null } : userType === 'sales' ? { qualifiedDate: { $ne: null } } : {}),
             leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } 
           } },
           { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadLostDate" } }, count: { $sum: 1 } } },
@@ -1643,10 +1699,22 @@ router.get('/admin/sources', authenticateToken, async (req, res) => {
   }
 });
 
+// Get all centres for admin dashboard dropdown
+router.get('/admin/centres', authenticateToken, async (req, res) => {
+  try {
+    const Centre = require('../models/Centre');
+    const centres = await Centre.find({ deletedAt: null }).select('_id name').sort({ name: 1 });
+    res.json(centres);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch centres' });
+  }
+});
+
 // Get users by type for admin dashboard
 router.get('/admin/users/:type', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
     // if (!['admin', 'marketing'].includes(user?.roleId?.slug)) {
     //   return res.status(403).json({ error: 'Access denied' });
     // }
@@ -1663,6 +1731,11 @@ router.get('/admin/users/:type', authenticateToken, async (req, res) => {
     } else {
       const presalesRoles = await Role.find({ slug: { $in: ['presales_agent', 'sales_agent'] } });
       roleFilter = { roleId: { $in: presalesRoles.map(r => r._id) } };
+    }
+
+    // Apply centre filter for sales_manager
+    if (userRole === 'sales_manager' && user.centreId) {
+      roleFilter.centreId = user.centreId;
     }
 
     const users = await User.find({ ...roleFilter, deletedAt: null }).select('_id name email').sort({ name: 1 });
