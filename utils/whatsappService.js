@@ -21,7 +21,7 @@ class WhatsAppService {
           messaging_product: 'whatsapp',
           type: 'template',
           template: {
-            name: 'new_lead_assigned',
+            name: 'lead_assigned',
             language: {
               code: 'en',
               policy: 'deterministic'
