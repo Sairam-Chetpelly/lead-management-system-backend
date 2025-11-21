@@ -6,6 +6,19 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const nodemailer = require('nodemailer');
+
+// Override console methods to add timestamps
+const originalLog = console.log;
+const originalError = console.error;
+const originalWarn = console.warn;
+const originalInfo = console.info;
+
+const getTimestamp = () => new Date().toISOString();
+
+console.log = (...args) => originalLog(`[${getTimestamp()}]`, ...args);
+console.error = (...args) => originalError(`[${getTimestamp()}]`, ...args);
+console.warn = (...args) => originalWarn(`[${getTimestamp()}]`, ...args);
+console.info = (...args) => originalInfo(`[${getTimestamp()}]`, ...args);
 const Lead = require('../models/Lead');
 const LeadActivity = require('../models/LeadActivity');
 const User = require('../models/User');
