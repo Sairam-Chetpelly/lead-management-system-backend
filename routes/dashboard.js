@@ -961,21 +961,21 @@ router.get('/admin', authenticateToken, async (req, res) => {
     // Source-wise data using Lead table
     const [sourceLeads, sourceQualified, sourceWon] = await Promise.all([
       Lead.aggregate([
-        { $match: leadFilter },
+        { $match: { ...leadFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) } },
         { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
         { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
         { $group: { _id: '$sourceName', count: { $sum: 1 } } },
         { $sort: { count: -1 } }
       ]),
       Lead.aggregate([
-        { $match: { ...leadFilter, leadStatusId: qualifiedStatus?._id } },
+        { $match: { ...leadFilter, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) } },
         { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
         { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
         { $group: { _id: '$sourceName', count: { $sum: 1 } } },
         { $sort: { count: -1 } }
       ]),
       Lead.aggregate([
-        { $match: { ...leadFilter, leadStatusId: wonStatus?._id } },
+        { $match: { ...leadFilter, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) } },
         { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
         { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
         { $group: { _id: '$sourceName', count: { $sum: 1 } } },
@@ -985,9 +985,9 @@ router.get('/admin', authenticateToken, async (req, res) => {
 
     // Visit and meeting data
     const [siteVisits, centerVisits, virtualMeetings] = await Promise.all([
-      Lead.countDocuments({ ...leadFilter, siteVisit: true }),
-      Lead.countDocuments({ ...leadFilter, centerVisit: true }),
-      Lead.countDocuments({ ...leadFilter, virtualMeeting: true })
+      Lead.countDocuments({ ...leadFilter, siteVisit: true, ...(Object.keys(createdAtFilter).length ? { siteVisitCompletedDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, centerVisit: true, ...(Object.keys(createdAtFilter).length ? { centerVisitCompletedDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, virtualMeeting: true, ...(Object.keys(createdAtFilter).length ? { virtualMeetingCompletedDate: createdAtFilter } : {}) })
     ]);
 
     // Daily visit and meeting trends using aggregation

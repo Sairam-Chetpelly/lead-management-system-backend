@@ -1040,9 +1040,11 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     if (req.query.assignedTo) {
-      filter.$or = [
-        { presalesUserId: req.query.assignedTo },
-        { salesUserId: req.query.assignedTo }
+      filter.$and = [
+        { $or: [
+          { presalesUserId: req.query.assignedTo },
+          { salesUserId: req.query.assignedTo }
+        ] }
       ];
     }
 
@@ -1291,9 +1293,11 @@ router.get('/export', authenticateToken, async (req, res) => {
     if (req.query.leadValue) filter.leadValue = req.query.leadValue;
     if (req.query.centre) filter.centreId = req.query.centre;
     if (req.query.assignedTo) {
-      filter.$or = [
+      filter.$and = [
+        { $or: [
           { presalesUserId: req.query.assignedTo },
           { salesUserId: req.query.assignedTo }
+        ] }
       ];
     }
     if (req.query.leadStatus) filter.leadStatusId = req.query.leadStatus;
