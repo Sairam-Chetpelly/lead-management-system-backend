@@ -769,7 +769,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
     // Apply centre filter for sales_manager and hod_sales
     if (userRole === 'sales_manager' && user.centreId) {
       leadFilter.centreId = user.centreId;
-    } else if (userRole === 'hod_sales') {
+    } else if (['hod_sales', 'admin', 'marketing'].includes(userRole)) {
       if (centreId && centreId !== 'all') {
         leadFilter.centreId = new mongoose.Types.ObjectId(centreId);
       }
@@ -792,7 +792,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
           // Filter by centre for sales_manager and hod_sales
           if (userRole === 'sales_manager' && user.centreId) {
             salesUserQuery.centreId = user.centreId;
-          } else if (userRole === 'hod_sales' && centreId && centreId !== 'all') {
+          } else if (['hod_sales', 'admin', 'marketing'].includes(userRole) && centreId && centreId !== 'all') {
             salesUserQuery.centreId = new mongoose.Types.ObjectId(centreId);
           }
           
@@ -808,13 +808,32 @@ router.get('/admin', authenticateToken, async (req, res) => {
         }).distinct('_id');
         
         if (presalesRoleIds.length > 0) {
-          const presalesUserIds = await User.find({ 
+          const presalesUserQuery = { 
             roleId: { $in: presalesRoleIds },
             deletedAt: null 
-          }).distinct('_id');
+          };
+          
+          // Filter by centre for presales users when center is selected
+          if (['hod_sales', 'admin', 'marketing'].includes(userRole) && centreId && centreId !== 'all') {
+            presalesUserQuery.centreId = new mongoose.Types.ObjectId(centreId);
+          }
+          
+          const presalesUserIds = await User.find(presalesUserQuery).distinct('_id');
           
           if (presalesUserIds.length > 0) {
             callFilter.userId = { $in: presalesUserIds };
+          }
+        }
+      } else {
+        // When no userType is selected but center is selected, filter all users by center
+        if (['hod_sales', 'admin', 'marketing'].includes(userRole) && centreId && centreId !== 'all') {
+          const centerUserIds = await User.find({ 
+            centreId: new mongoose.Types.ObjectId(centreId),
+            deletedAt: null 
+          }).distinct('_id');
+          
+          if (centerUserIds.length > 0) {
+            callFilter.userId = { $in: centerUserIds };
           }
         }
       }
