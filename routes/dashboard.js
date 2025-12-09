@@ -387,10 +387,9 @@ router.get('/stats', authenticateToken, async (req, res) => {
       count: item.count
     }));
 
-    // Source-wise qualified lead distribution
-    const qualifiedFilter = qualifiedStatus ? { leadStatusId: qualifiedStatus._id } : {};
+    // Source-wise qualified lead distribution (ever qualified)
     const sourceQualifiedPipeline = [
-      { $match: getLeadFilter(qualifiedFilter) },
+      { $match: getLeadFilter({ qualifiedDate: { $ne: null } }) },
       {
         $lookup: {
           from: 'leadsources',
@@ -987,7 +986,7 @@ router.get('/admin', authenticateToken, async (req, res) => {
         { $sort: { count: -1 } }
       ]),
       Lead.aggregate([
-        { $match: { ...leadFilter, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) } },
+        { $match: { ...leadFilter, qualifiedDate: { $ne: null }, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) } },
         { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
         { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
         { $group: { _id: '$sourceName', count: { $sum: 1 } } },
@@ -1726,6 +1725,64 @@ router.get('/admin/centres', authenticateToken, async (req, res) => {
     res.json(centres);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch centres' });
+  }
+});
+
+// Export dashboard data
+router.get('/export', authenticateToken, async (req, res) => {
+  try {
+    const dashboardReq = { ...req, url: '/api/dashboard/admin', query: req.query };
+    const dashboardRes = { json: (data) => data };
+    
+    const adminHandler = router.stack.find(r => r.route?.path === '/admin')?.route?.stack[0]?.handle;
+    const data = await new Promise((resolve) => {
+      const mockRes = { json: resolve, status: () => mockRes };
+      adminHandler(req, mockRes, () => {});
+    });
+
+    const csv = [
+      ['Metric', 'Value'],
+      ['Total Leads', data.totalLeads],
+      ['Leads MTD', data.leadsMTD],
+      ['Leads Today', data.leadsToday],
+      ['Total Calls', data.totalCalls],
+      ['Calls MTD', data.callsMTD],
+      ['Calls Today', data.callsToday],
+      ['Total Qualified', data.totalQualified],
+      ['Qualified MTD', data.qualifiedMTD],
+      ['Qualified Today', data.qualifiedToday],
+      ['Total Lost', data.totalLost],
+      ['Lost MTD', data.lostMTD],
+      ['Lost Today', data.lostToday],
+      ['Total Won', data.totalWon],
+      ['Won MTD', data.wonMTD],
+      ['Won Today', data.wonToday],
+      ['Site Visits', data.siteVisits],
+      ['Center Visits', data.centerVisits],
+      ['Virtual Meetings', data.virtualMeetings],
+      [''],
+      ['Daily Leads'],
+      ['Date', 'Count'],
+      ...data.dailyLeads.map(d => [d.date, d.count]),
+      [''],
+      ['Daily Calls'],
+      ['Date', 'Count'],
+      ...data.dailyCalls.map(d => [d.date, d.count]),
+      [''],
+      ['Source Wise Leads'],
+      ['Source', 'Count'],
+      ...data.sourceLeads.map(s => [s._id, s.count]),
+      [''],
+      ['Source Wise Qualified'],
+      ['Source', 'Count'],
+      ...data.sourceQualified.map(s => [s._id, s.count])
+    ].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=dashboard-export.csv');
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ error: 'Export failed' });
   }
 });
 
