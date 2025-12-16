@@ -45,7 +45,7 @@ class WhatsAppService {
                   },
                   body_4: {
                     type: 'text',
-                    value: lead.comment || 'N/A'
+                    value: (lead.comment || 'N/A').replace(/[\n\r]+/g, ' ').trim()
                   }
                 }
               }
@@ -96,7 +96,7 @@ class WhatsAppService {
             to: `91${mobileNumber}`,
             type: 'text',
             text: {
-              body: message
+              body: message.replace(/[\n\r]+/g, ' ').trim()
             }
           }
         };
