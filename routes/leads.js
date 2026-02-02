@@ -2570,7 +2570,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 }
 
                 // Check if campaign is Channel Partners
-                const isChannelPartners = campaignName && campaignName.toLowerCase().includes('channel partners');
+                const isChannelPartners = campaignName && campaignName.toLowerCase().includes('channel');
                 
                 // Get or create lead source based on campaign
                 let leadSource;
