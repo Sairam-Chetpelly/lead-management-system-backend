@@ -1,0 +1,409 @@
+# Backend Architecture Diagram
+
+## Request Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Client Request                          │
+│                    (Browser/Mobile App)                         │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         Express App                             │
+│                        (src/app.js)                             │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         Middleware Layer                        │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │   CORS   │→ │   Rate   │→ │   API    │→ │   Auth   │      │
+│  │          │  │  Limiter │  │   Key    │  │   JWT    │      │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘      │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         Route Layer                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │   Auth   │  │   User   │  │   Lead   │  │  Admin   │      │
+│  │  Routes  │  │  Routes  │  │  Routes  │  │  Routes  │      │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
+└───────┼─────────────┼─────────────┼─────────────┼──────────────┘
+        │             │             │             │
+        ▼             ▼             ▼             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Validation Layer                           │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │   Auth   │  │   User   │  │   Lead   │  │  Admin   │      │
+│  │Validation│  │Validation│  │Validation│  │Validation│      │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
+└───────┼─────────────┼─────────────┼─────────────┼──────────────┘
+        │             │             │             │
+        ▼             ▼             ▼             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Controller Layer                           │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │   Auth   │  │   User   │  │   Lead   │  │  Admin   │      │
+│  │Controller│  │Controller│  │Controller│  │Controller│      │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
+└───────┼─────────────┼─────────────┼─────────────┼──────────────┘
+        │             │             │             │
+        ▼             ▼             ▼             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       Service Layer                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │  Email   │  │ WhatsApp │  │   SMS    │  │   File   │      │
+│  │ Service  │  │ Service  │  │ Service  │  │ Service  │      │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
+└───────┼─────────────┼─────────────┼─────────────┼──────────────┘
+        │             │             │             │
+        └─────────────┴─────────────┴─────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        Model Layer                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │   User   │  │   Lead   │  │   Role   │  │  Centre  │      │
+│  │  Model   │  │  Model   │  │  Model   │  │  Model   │      │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
+└───────┼─────────────┼─────────────┼─────────────┼──────────────┘
+        │             │             │             │
+        └─────────────┴─────────────┴─────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         MongoDB                                 │
+│                    (Database Layer)                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Directory Structure
+
+```
+backend/
+│
+├── src/                          # New modular structure
+│   │
+│   ├── config/                   # Configuration files
+│   │   ├── database.js          # MongoDB connection
+│   │   ├── cors.js              # CORS settings
+│   │   └── rateLimiter.js       # Rate limiting
+│   │
+│   ├── middlewares/              # Express middleware
+│   │   ├── auth.js              # JWT authentication
+│   │   └── apiKeyAuth.js        # API key validation
+│   │
+│   ├── modules/                  # Feature modules
+│   │   │
+│   │   ├── auth/                # Authentication module
+│   │   │   └── auth.controller.js
+│   │   │
+│   │   ├── user/                # User module
+│   │   │   ├── user.controller.js
+│   │   │   └── user.upload.js
+│   │   │
+│   │   ├── admin/               # Admin module (TODO)
+│   │   │   └── admin.controller.js
+│   │   │
+│   │   ├── lead/                # Lead module (TODO)
+│   │   │   ├── lead.controller.js
+│   │   │   ├── lead.webhook.js
+│   │   │   └── lead.bulk.js
+│   │   │
+│   │   └── dashboard/           # Dashboard module (TODO)
+│   │       └── dashboard.controller.js
+│   │
+│   ├── routes/                   # Route definitions
+│   │   ├── auth.routes.js       # Auth routes
+│   │   ├── user.routes.js       # User routes
+│   │   └── index.js             # Route exports
+│   │
+│   ├── services/                 # Business logic services
+│   │   ├── emailService.js      # Email service
+│   │   ├── whatsappService.js   # WhatsApp service
+│   │   └── smsService.js        # SMS service (TODO)
+│   │
+│   ├── utils/                    # Utility functions
+│   │   ├── crudController.js    # Generic CRUD
+│   │   └── helpers.js           # Helper functions
+│   │
+│   ├── validations/              # Input validation
+│   │   ├── auth.validation.js   # Auth validation
+│   │   └── user.validation.js   # User validation
+│   │
+│   ├── app.js                    # Express app setup
+│   └── server.js                 # Server entry point
+│
+├── models/                       # Mongoose models
+│   ├── User.js
+│   ├── Lead.js
+│   ├── Role.js
+│   └── ...
+│
+├── routes/                       # Old routes (legacy)
+│   ├── admin.js
+│   ├── leads.js
+│   └── ...
+│
+├── uploads/                      # File uploads
+│   ├── profiles/
+│   ├── documents/
+│   └── csv/
+│
+├── .env                          # Environment variables
+├── package.json                  # Dependencies
+├── server.js                     # Old entry point (legacy)
+│
+└── Documentation/
+    ├── README.md                 # Main documentation
+    ├── MIGRATION.md              # Migration guide
+    ├── QUICKSTART.md             # Quick start
+    └── RESTRUCTURING_SUMMARY.md  # This summary
+```
+
+## Module Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Module Structure                        │
+│                                                                 │
+│  modules/[feature]/                                            │
+│  │                                                              │
+│  ├── [feature].controller.js    ← Business logic              │
+│  │   ├── getAll()                                              │
+│  │   ├── create()                                              │
+│  │   ├── update()                                              │
+│  │   └── delete()                                              │
+│  │                                                              │
+│  ├── [feature].service.js       ← Complex business logic      │
+│  │   ├── processData()                                         │
+│  │   └── calculateMetrics()                                    │
+│  │                                                              │
+│  └── [feature].*.js             ← Feature-specific files      │
+│      ├── [feature].upload.js    ← File upload handling        │
+│      ├── [feature].webhook.js   ← Webhook handling            │
+│      └── [feature].bulk.js      ← Bulk operations             │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Data Flow Example: User Login
+
+```
+1. Client Request
+   POST /api/auth/login
+   { email, password }
+        │
+        ▼
+2. Middleware Chain
+   CORS → Rate Limiter → API Key → Validation
+        │
+        ▼
+3. Route Handler
+   auth.routes.js
+   POST /login → validateLogin → authController.login
+        │
+        ▼
+4. Controller
+   auth.controller.js
+   - Validate credentials
+   - Generate JWT token
+   - Return response
+        │
+        ▼
+5. Model Layer
+   User.findOne({ email })
+   user.comparePassword(password)
+        │
+        ▼
+6. Database
+   MongoDB query
+   Return user document
+        │
+        ▼
+7. Response
+   { token, user, expiresAt }
+```
+
+## Authentication Flow
+
+```
+┌──────────────┐
+│   Client     │
+└──────┬───────┘
+       │ 1. POST /api/auth/login
+       │    { email, password }
+       ▼
+┌──────────────────────────────┐
+│   Rate Limiter Middleware    │
+│   (50,000 req/15min)         │
+└──────┬───────────────────────┘
+       │ 2. Check rate limit
+       ▼
+┌──────────────────────────────┐
+│   API Key Middleware         │
+│   (Validate x-api-key)       │
+└──────┬───────────────────────┘
+       │ 3. Validate API key
+       ▼
+┌──────────────────────────────┐
+│   Validation Middleware      │
+│   (express-validator)        │
+└──────┬───────────────────────┘
+       │ 4. Validate input
+       ▼
+┌──────────────────────────────┐
+│   Auth Controller            │
+│   - Find user                │
+│   - Compare password         │
+│   - Generate JWT             │
+└──────┬───────────────────────┘
+       │ 5. Return token
+       ▼
+┌──────────────┐
+│   Client     │
+│   Store JWT  │
+└──────────────┘
+```
+
+## Protected Route Flow
+
+```
+┌──────────────┐
+│   Client     │
+└──────┬───────┘
+       │ 1. GET /api/users
+       │    Authorization: Bearer <token>
+       │    x-api-key: <key>
+       ▼
+┌──────────────────────────────┐
+│   Rate Limiter Middleware    │
+│   (10,000 req/15min per user)│
+└──────┬───────────────────────┘
+       │ 2. Check rate limit
+       ▼
+┌──────────────────────────────┐
+│   API Key Middleware         │
+└──────┬───────────────────────┘
+       │ 3. Validate API key
+       ▼
+┌──────────────────────────────┐
+│   Auth Middleware            │
+│   - Verify JWT               │
+│   - Decode user ID           │
+│   - Attach to req.user       │
+└──────┬───────────────────────┘
+       │ 4. Authenticated
+       ▼
+┌──────────────────────────────┐
+│   User Controller            │
+│   - Get users from DB        │
+│   - Apply filters            │
+│   - Return paginated data    │
+└──────┬───────────────────────┘
+       │ 5. Return data
+       ▼
+┌──────────────┐
+│   Client     │
+└──────────────┘
+```
+
+## Configuration Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Environment Variables                      │
+│                          (.env file)                            │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Config Files                               │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
+│  │  database.js │  │   cors.js    │  │rateLimiter.js│         │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘         │
+└─────────┼──────────────────┼──────────────────┼──────────────────┘
+          │                  │                  │
+          └──────────────────┴──────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         app.js                                  │
+│                   (Import and use configs)                      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Error Handling Flow
+
+```
+Controller
+    │
+    ├─ try {
+    │    Business Logic
+    │  }
+    │
+    └─ catch (error) {
+         │
+         ├─ Log error
+         │
+         ├─ Determine error type
+         │   ├─ Validation Error → 400
+         │   ├─ Auth Error → 401
+         │   ├─ Permission Error → 403
+         │   ├─ Not Found → 404
+         │   └─ Server Error → 500
+         │
+         └─ Send error response
+             { error: message }
+       }
+```
+
+## Deployment Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Production                              │
+│                                                                 │
+│  ┌──────────────┐         ┌──────────────┐                    │
+│  │   Vercel     │────────▶│   MongoDB    │                    │
+│  │  (Backend)   │         │   Atlas      │                    │
+│  └──────────────┘         └──────────────┘                    │
+│         │                                                       │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌──────────────┐                                              │
+│  │   Vercel     │                                              │
+│  │  (Frontend)  │                                              │
+│  └──────────────┘                                              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                         Development                             │
+│                                                                 │
+│  ┌──────────────┐         ┌──────────────┐                    │
+│  │  localhost   │────────▶│   MongoDB    │                    │
+│  │    :5000     │         │   Local      │                    │
+│  └──────────────┘         └──────────────┘                    │
+│         │                                                       │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌──────────────┐                                              │
+│  │  localhost   │                                              │
+│  │    :3000     │                                              │
+│  └──────────────┘                                              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+This architecture provides:
+- ✅ Clear separation of concerns
+- ✅ Scalable structure
+- ✅ Easy to maintain
+- ✅ Testable components
+- ✅ Reusable services
+- ✅ Consistent patterns
