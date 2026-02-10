@@ -3,6 +3,7 @@ const Keyword = require('../models/Keyword');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { addWatermark } = require('../utils/watermark');
 
 // Configure multer for document uploads
 const storage = multer.diskStorage({
@@ -21,17 +22,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|pdf|doc|docx|xls|xlsx/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-    if (extname && mimetype) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type'));
-    }
-  }
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
 // Upload document
@@ -63,14 +54,47 @@ exports.uploadDocument = [
         }
       }
 
+      // Process images: convert to WebP and compress
+      let finalPath = req.file.path;
+      let finalMimeType = req.file.mimetype;
+      let finalFileName = req.file.originalname;
+      
+      if (req.file.mimetype.startsWith('image/')) {
+        const sharp = require('sharp');
+        const webpPath = finalPath.replace(path.extname(finalPath), '.webp');
+        
+        try {
+          await sharp(finalPath)
+            .webp({ quality: 80 })
+            .toFile(webpPath);
+          
+          // Delete original image
+          fs.unlinkSync(finalPath);
+          finalPath = webpPath;
+          finalMimeType = 'image/webp';
+          finalFileName = req.file.originalname.replace(path.extname(req.file.originalname), '.webp');
+        } catch (error) {
+          console.error('Image conversion error:', error.message);
+          // Continue with original if conversion fails
+        }
+      }
+
+      // Add watermark to images and PDFs
+      try {
+        finalPath = await addWatermark(finalPath, finalMimeType);
+      } catch (error) {
+        console.error('Watermark error:', error.message);
+        // Continue without watermark if it fails
+      }
+
       const document = new Document({
         folderId: folderId || null,
-        fileName: req.file.originalname,
+        fileName: finalFileName,
         title,
         subtitle,
-        filePath: req.file.path,
-        fileType: req.file.mimetype,
-        fileSize: req.file.size,
+        filePath: finalPath,
+        fileType: finalMimeType,
+        fileSize: fs.statSync(finalPath).size,
         uploadedBy: req.user.userId,
         category,
         description,
@@ -145,6 +169,27 @@ exports.downloadDocument = async (req, res) => {
     }
     res.download(document.filePath, document.fileName);
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// View/Preview document
+exports.viewDocument = async (req, res) => {
+  try {
+    const document = await Document.findOne({ _id: req.params.id, deletedAt: null });
+    if (!document) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    
+    if (!fs.existsSync(document.filePath)) {
+      return res.status(404).json({ error: 'File not found on server' });
+    }
+    
+    res.setHeader('Content-Type', document.fileType);
+    res.setHeader('Content-Disposition', 'inline');
+    res.sendFile(path.resolve(document.filePath));
+  } catch (error) {
+    console.error('View document error:', error);
     res.status(500).json({ error: error.message });
   }
 };

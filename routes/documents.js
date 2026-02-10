@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth');
+const { authenticateTokenFlexible } = require('../middleware/authFlexible');
 const documentController = require('../controllers/documentController');
 
-// All routes require authentication
+// View document (flexible auth for iframe/img src)
+router.get('/:id/view', authenticateTokenFlexible, documentController.viewDocument);
+
+// All other routes require standard authentication
 router.use(authenticateToken);
 
 // Upload document
