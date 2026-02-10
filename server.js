@@ -22,6 +22,9 @@ const callLogRoutes = require('./routes/callLogs');
 const activityLogRoutes = require('./routes/activityLogs');
 const leadActivityRoutes = require('./routes/leadActivities');
 const metaRoutes = require('./routes/meta');
+const documentRoutes = require('./routes/documents');
+const folderRoutes = require('./routes/folders');
+const keywordRoutes = require('./routes/keywords');
 const { startTokenScheduler } = require('./utils/tokenScheduler');
 
 const app = express();
@@ -96,6 +99,9 @@ app.use('/api/call-logs', callLogRoutes);
 app.use('/api/activity-logs', activityLogRoutes);
 app.use('/api/lead-activities', leadActivityRoutes);
 app.use('/api/meta', metaRoutes);
+app.use('/api/documents', documentRoutes);
+app.use('/api/folders', folderRoutes);
+app.use('/api/keywords', keywordRoutes);
 
 // For Vercel deployment
 module.exports = app;
