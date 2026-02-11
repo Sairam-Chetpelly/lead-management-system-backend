@@ -22,6 +22,9 @@ router.get('/:id', documentController.getDocument);
 // Download document
 router.get('/:id/download', documentController.downloadDocument);
 
+// Update document
+router.put('/:id', documentController.updateDocument);
+
 // Delete document
 router.delete('/:id', documentController.deleteDocument);
 

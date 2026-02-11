@@ -102,7 +102,7 @@ exports.uploadDocument = [
       });
 
       await document.save();
-      await document.populate(['uploadedBy', 'keywords']);
+      await document.populate(['uploadedBy', 'keywords', 'folderId']);
 
       res.status(201).json(document);
     } catch (error) {
@@ -115,29 +115,56 @@ exports.uploadDocument = [
 // Get documents by folder or root
 exports.getDocuments = async (req, res) => {
   try {
-    const { folderId, keyword } = req.query;
+    const { folderId, keyword, keywords } = req.query;
     
     let query = { deletedAt: null };
     
-    if (folderId) {
-      query.folderId = folderId;
-    } else if (folderId === undefined) {
-      query.folderId = null;
-    }
+    // If search or keyword filters are active, search all documents
+    const hasFilters = keyword || keywords;
     
-    // Search by keyword
+    if (!hasFilters) {
+      // No filters: show only current folder documents
+      if (folderId) {
+        query.folderId = folderId;
+      } else if (folderId === undefined) {
+        query.folderId = null;
+      }
+    }
+    // If filters are active, search across all documents (ignore folderId)
+    
+    // Search by single keyword (text search)
     if (keyword) {
-      const keywordDoc = await Keyword.findOne({ name: keyword.toLowerCase() });
+      const keywordDoc = await Keyword.findOne({ name: { $regex: keyword, $options: 'i' } });
       if (keywordDoc) {
         query.keywords = keywordDoc._id;
       } else {
-        return res.json([]);
+        // Also search in title, subtitle, fileName
+        query.$or = [
+          { title: { $regex: keyword, $options: 'i' } },
+          { subtitle: { $regex: keyword, $options: 'i' } },
+          { fileName: { $regex: keyword, $options: 'i' } }
+        ];
+      }
+    }
+    
+    // Filter by multiple keywords
+    if (keywords) {
+      const keywordArray = keywords.split(',').map(k => k.trim()).filter(k => k);
+      if (keywordArray.length > 0) {
+        const keywordDocs = await Keyword.find({ name: { $in: keywordArray } });
+        const keywordIds = keywordDocs.map(k => k._id);
+        if (keywordIds.length > 0) {
+          query.keywords = { $in: keywordIds };
+        } else {
+          return res.json([]);
+        }
       }
     }
     
     const documents = await Document.find(query)
       .populate('uploadedBy', 'name email')
       .populate('keywords')
+      .populate('folderId', 'name')
       .sort({ createdAt: -1 });
     res.json(documents);
   } catch (error) {
@@ -214,6 +241,55 @@ exports.deleteDocument = async (req, res) => {
     document.deletedAt = new Date();
     await document.save();
     res.json({ message: 'Document deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Update document
+exports.updateDocument = async (req, res) => {
+  try {
+    const { title, subtitle, category, keywords } = req.body;
+    const document = await Document.findById(req.params.id);
+    
+    if (!document) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    // Decrease old keywords usage count
+    for (const keywordId of document.keywords) {
+      const keyword = await Keyword.findById(keywordId);
+      if (keyword) {
+        keyword.usageCount = Math.max(0, keyword.usageCount - 1);
+        await keyword.save();
+      }
+    }
+
+    // Process new keywords
+    let keywordIds = [];
+    if (keywords && keywords.length > 0) {
+      for (const keywordName of keywords) {
+        if (keywordName) {
+          let keyword = await Keyword.findOne({ name: keywordName.toLowerCase() });
+          if (!keyword) {
+            keyword = await Keyword.create({ name: keywordName.toLowerCase() });
+          }
+          keyword.usageCount += 1;
+          await keyword.save();
+          keywordIds.push(keyword._id);
+        }
+      }
+    }
+
+    document.title = title;
+    document.subtitle = subtitle;
+    document.category = category;
+    document.keywords = keywordIds;
+    
+    await document.save();
+    await document.populate(['uploadedBy', 'keywords', 'folderId']);
+    
+    res.json(document);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
