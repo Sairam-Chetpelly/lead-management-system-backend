@@ -127,6 +127,14 @@ const leadActivitySchema = new mongoose.Schema({
     type: Date,
     required: false
   },
+  leadClosure: {
+    type: Boolean,
+    required: false
+  },
+  leadClosureDate: {
+    type: Date,
+    required: false
+  },
   meetingArrangedDate: {
     type: String,
     required: false

@@ -1432,6 +1432,8 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Site Visit': lead.siteVisit ? 'Yes' : 'No',
       'Site Visit Date': lead.siteVisitDate ? new Date(lead.siteVisitDate).toLocaleDateString() : '',
       'Site Visit Completed Date': lead.siteVisitCompletedDate ? new Date(lead.siteVisitCompletedDate).toLocaleDateString() : '',
+      'Lead Closure': lead.leadClosure ? 'Yes' : 'No',
+      'Lead Closure Date': lead.leadClosureDate ? new Date(lead.leadClosureDate).toLocaleDateString() : '',
       'Center Visit': lead.centerVisit ? 'Yes' : 'No',
       'Center Visit Date': lead.centerVisitDate ? new Date(lead.centerVisitDate).toLocaleDateString() : '',
       'Center Visit Completed Date': lead.centerVisitCompletedDate ? new Date(lead.centerVisitCompletedDate).toLocaleDateString() : '',
@@ -1913,7 +1915,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       'languageId', 'centreId', 'projectTypeId', 'projectValue', 'apartmentName',
       'houseTypeId', 'expectedPossessionDate', 'leadValue',
       'siteVisit', 'siteVisitDate', 'siteVisitCompletedDate', 'centerVisit', 'centerVisitDate', 'centerVisitCompletedDate',
-      'virtualMeeting', 'virtualMeetingDate', 'virtualMeetingCompletedDate', 'meetingArrangedDate', 'comment', 'cifDate',
+      'virtualMeeting', 'virtualMeetingDate', 'virtualMeetingCompletedDate', 'leadClosure', 'leadClosureDate', 'meetingArrangedDate', 'comment', 'cifDate',
       'outOfStation', 'requirementWithinTwoMonths', 'cpUserName'
     ];
 

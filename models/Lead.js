@@ -127,6 +127,14 @@ const leadSchema = new mongoose.Schema({
     type: Date,
     required: false
   },
+  leadClosure: {
+    type: Boolean,
+    required: false
+  },
+  leadClosureDate: {
+    type: Date,
+    required: false
+  },
   meetingArrangedDate: {
     type: String,
     required: false
@@ -239,6 +247,8 @@ leadSchema.pre('save', async function(next) {
       virtualMeeting: this.virtualMeeting,
       virtualMeetingDate: this.virtualMeetingDate,
       virtualMeetingCompletedDate: this.virtualMeetingCompletedDate,
+      leadClosure: this.leadClosure,
+      leadClosureDate: this.leadClosureDate,
       meetingArrangedDate: this.meetingArrangedDate,
       cifDate: this.cifDate,
       leadWonDate: this.leadWonDate,

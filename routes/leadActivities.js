@@ -14,13 +14,13 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Build filter
     const filter = { deletedAt: null };
-    
+
     // Date range filters
     if (req.query.startDate && req.query.endDate) {
       const startDate = new Date(req.query.startDate);
       const endDate = new Date(req.query.endDate);
       endDate.setHours(23, 59, 59, 999);
-      
+
       filter.createdAt = {
         $gte: startDate,
         $lte: endDate
@@ -32,7 +32,7 @@ router.get('/', authenticateToken, async (req, res) => {
       endDate.setHours(23, 59, 59, 999);
       filter.createdAt = { $lte: endDate };
     }
-    
+
     if (req.query.userId) {
       filter.$or = [
         { presalesUserId: req.query.userId },
@@ -92,7 +92,7 @@ router.get('/export', authenticateToken, async (req, res) => {
 
     // Build filter (same as main endpoint)
     const filter = { deletedAt: null };
-    
+
     // Role-based filtering (similar to leads export)
     if (userRole === 'presales_agent') {
       filter.$or = [
@@ -110,13 +110,13 @@ router.get('/export', authenticateToken, async (req, res) => {
         filter.centreId = user.centreId;
       }
     }
-    
+
     // Date range filters
     if (req.query.startDate && req.query.endDate) {
       const startDate = new Date(req.query.startDate);
       const endDate = new Date(req.query.endDate);
       endDate.setHours(23, 59, 59, 999);
-      
+
       filter.createdAt = {
         $gte: startDate,
         $lte: endDate
@@ -128,7 +128,7 @@ router.get('/export', authenticateToken, async (req, res) => {
       endDate.setHours(23, 59, 59, 999);
       filter.createdAt = { $lte: endDate };
     }
-    
+
     if (req.query.userId) {
       filter.$or = [
         { presalesUserId: req.query.userId },
@@ -192,6 +192,8 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Site Visit': activity.siteVisit ? 'Yes' : 'No',
       'Site Visit Date': activity.siteVisitDate ? new Date(activity.siteVisitDate).toLocaleDateString() : '',
       'Site Visit Completed Date': activity.siteVisitCompletedDate ? new Date(activity.siteVisitCompletedDate).toLocaleDateString() : '',
+      'Lead Closure': activity.leadClosure ? 'Yes' : 'No',
+      'Lead Closure Date': activity.leadClosureDate ? new Date(activity.leadClosureDate).toLocaleDateString() : '',
       'Center Visit': activity.centerVisit ? 'Yes' : 'No',
       'Center Visit Date': activity.centerVisitDate ? new Date(activity.centerVisitDate).toLocaleDateString() : '',
       'Center Visit Completed Date': activity.centerVisitCompletedDate ? new Date(activity.centerVisitCompletedDate).toLocaleDateString() : '',
