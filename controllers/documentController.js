@@ -30,6 +30,7 @@ exports.uploadDocument = [
   upload.single('file'),
   async (req, res) => {
     try {
+      console.log('Upload endpoint hit');
       const { category, description, folderId, keywords, title, subtitle } = req.body;
 
       if (!req.file) {
@@ -106,7 +107,10 @@ exports.uploadDocument = [
 
       res.status(201).json(document);
     } catch (error) {
-      if (req.file) fs.unlinkSync(req.file.path);
+      console.error('Upload error:', error);
+      if (req.file && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
       res.status(500).json({ error: error.message });
     }
   }
