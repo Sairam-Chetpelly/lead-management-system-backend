@@ -1,0 +1,332 @@
+paths:
+  /leads:
+    get:
+      tags:
+        - Leads
+      summary: Get all leads
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: source
+          in: query
+          schema:
+            type: string
+        - name: leadStatus
+          in: query
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Leads retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  leads:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Lead'
+                  pagination:
+                    $ref: '../openapi.yaml#/components/schemas/Pagination'
+    post:
+      tags:
+        - Leads
+      summary: Create lead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - contactNumber
+                - assignmentType
+                - leadSourceId
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                contactNumber:
+                  type: string
+                  pattern: '^\d{10}$'
+                assignmentType:
+                  type: string
+                  enum: [presales, sales]
+                leadSourceId:
+                  type: string
+                centreId:
+                  type: string
+                languageId:
+                  type: string
+                leadValue:
+                  type: string
+                  enum: [high value, low value]
+                comment:
+                  type: string
+      responses:
+        '201':
+          description: Lead created
+        '400':
+          description: Validation error
+
+  /leads/{id}:
+    get:
+      tags:
+        - Leads
+      summary: Get lead by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lead retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lead:
+                    $ref: '#/components/schemas/Lead'
+                  callLogs:
+                    type: array
+                  activityLogs:
+                    type: array
+        '404':
+          description: Lead not found
+    put:
+      tags:
+        - Leads
+      summary: Update lead
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Lead updated
+    delete:
+      tags:
+        - Leads
+      summary: Delete lead
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lead deleted
+
+  /leads/bulk-upload:
+    post:
+      tags:
+        - Leads
+      summary: Bulk upload presales leads
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Leads uploaded
+        '207':
+          description: Partial success
+
+  /leads/export:
+    get:
+      tags:
+        - Leads
+      summary: Export leads to CSV
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: CSV data
+
+  /leads/{id}/call:
+    post:
+      tags:
+        - Leads
+      summary: Log call
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Call logged
+
+  /leads/{id}/activity:
+    post:
+      tags:
+        - Leads
+      summary: Log activity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - type
+                - comment
+              properties:
+                type:
+                  type: string
+                comment:
+                  type: string
+                document:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Activity logged
+
+  /leads/webhook/google-ads:
+    post:
+      tags:
+        - Leads
+      summary: Google Ads webhook
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed
+
+  /leads/webhook/meta-ads:
+    get:
+      tags:
+        - Leads
+      summary: Meta webhook verification
+      security: []
+      parameters:
+        - name: hub.mode
+          in: query
+          schema:
+            type: string
+        - name: hub.verify_token
+          in: query
+          schema:
+            type: string
+        - name: hub.challenge
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Verified
+    post:
+      tags:
+        - Leads
+      summary: Meta Ads webhook
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed
+
+components:
+  schemas:
+    Lead:
+      type: object
+      properties:
+        _id:
+          type: string
+        leadID:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        contactNumber:
+          type: string
+        sourceId:
+          type: object
+        centreId:
+          type: object
+        leadStatusId:
+          type: object
+        leadSubStatusId:
+          type: object
+        presalesUserId:
+          type: object
+        salesUserId:
+          type: object
+        leadValue:
+          type: string
+        comment:
+          type: string
+        createdAt:
+          type: string
+          format: date-time

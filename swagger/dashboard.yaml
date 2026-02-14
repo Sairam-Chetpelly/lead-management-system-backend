@@ -1,0 +1,162 @@
+paths:
+  /dashboard/admin:
+    get:
+      tags:
+        - Dashboard
+      summary: Get admin dashboard
+      parameters:
+        - name: userType
+          in: query
+          schema:
+            type: string
+            enum: [presales, sales]
+        - name: agentId
+          in: query
+          schema:
+            type: string
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: sourceId
+          in: query
+          schema:
+            type: string
+        - name: centreId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dashboard data retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalLeads:
+                    type: integer
+                  leadsMTD:
+                    type: integer
+                  leadsToday:
+                    type: integer
+                  totalCalls:
+                    type: integer
+                  callsMTD:
+                    type: integer
+                  callsToday:
+                    type: integer
+                  totalQualified:
+                    type: integer
+                  qualifiedMTD:
+                    type: integer
+                  qualifiedToday:
+                    type: integer
+                  totalLost:
+                    type: integer
+                  lostMTD:
+                    type: integer
+                  lostToday:
+                    type: integer
+                  totalWon:
+                    type: integer
+                  wonMTD:
+                    type: integer
+                  wonToday:
+                    type: integer
+                  siteVisits:
+                    type: integer
+                  centerVisits:
+                    type: integer
+                  virtualMeetings:
+                    type: integer
+                  dailyLeads:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                        count:
+                          type: integer
+                  dailyCalls:
+                    type: array
+                    items:
+                      type: object
+                  sourceLeads:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        _id:
+                          type: string
+                        count:
+                          type: integer
+                  role:
+                    type: string
+                  showFilters:
+                    type: boolean
+
+  /dashboard/admin/sources:
+    get:
+      tags:
+        - Dashboard
+      summary: Get all sources
+      responses:
+        '200':
+          description: Sources retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    _id:
+                      type: string
+                    name:
+                      type: string
+
+  /dashboard/admin/centres:
+    get:
+      tags:
+        - Dashboard
+      summary: Get all centres
+      responses:
+        '200':
+          description: Centres retrieved
+
+  /dashboard/admin/users/{type}:
+    get:
+      tags:
+        - Dashboard
+      summary: Get users by type
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [sales, presales, all]
+      responses:
+        '200':
+          description: Users retrieved
+
+  /dashboard/export:
+    get:
+      tags:
+        - Dashboard
+      summary: Export dashboard data
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string

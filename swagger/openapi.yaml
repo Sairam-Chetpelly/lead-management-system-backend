@@ -1,0 +1,111 @@
+openapi: 3.0.0
+info:
+  title: Lead Management System API
+  version: 1.0.0
+  description: Complete API documentation for LMS backend
+  contact:
+    name: LMS Development Team
+    email: support@lms.com
+
+servers:
+  - url: http://localhost:5000/api
+    description: Development server
+  - url: https://api.lms.com/api
+    description: Production server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+
+    Pagination:
+      type: object
+      properties:
+        current:
+          type: integer
+        pages:
+          type: integer
+        total:
+          type: integer
+        limit:
+          type: integer
+
+security:
+  - bearerAuth: []
+  - apiKey: []
+
+tags:
+  - name: Authentication
+    description: User authentication and session management
+  - name: Admin
+    description: Admin management endpoints
+  - name: Leads
+    description: Lead management operations
+  - name: Users
+    description: User management
+  - name: Dashboard
+    description: Analytics and reporting
+  - name: Call Logs
+    description: Call activity tracking
+  - name: Activity Logs
+    description: Manual activity tracking
+  - name: Lead Sources
+    description: Lead source management
+  - name: Documents
+    description: Document management
+
+paths:
+  # Reference to separate files
+  /auth/login:
+    $ref: './auth.yaml#/paths/~1auth~1login'
+  /auth/status:
+    $ref: './auth.yaml#/paths/~1auth~1status'
+  /auth/forgot-password:
+    $ref: './auth.yaml#/paths/~1auth~1forgot-password'
+  /auth/reset-password:
+    $ref: './auth.yaml#/paths/~1auth~1reset-password'
+  
+  /admin/roles:
+    $ref: './admin.yaml#/paths/~1admin~1roles'
+  /admin/centres:
+    $ref: './admin.yaml#/paths/~1admin~1centres'
+  /admin/languages:
+    $ref: './admin.yaml#/paths/~1admin~1languages'
+  /admin/statuses:
+    $ref: './admin.yaml#/paths/~1admin~1statuses'
+  /admin/users:
+    $ref: './admin.yaml#/paths/~1admin~1users'
+  
+  /leads:
+    $ref: './leads.yaml#/paths/~1leads'
+  /leads/{id}:
+    $ref: './leads.yaml#/paths/~1leads~1{id}'
+  /leads/bulk-upload:
+    $ref: './leads.yaml#/paths/~1leads~1bulk-upload'
+  /leads/export:
+    $ref: './leads.yaml#/paths/~1leads~1export'
+  
+  /users:
+    $ref: './users.yaml#/paths/~1users'
+  /users/{id}:
+    $ref: './users.yaml#/paths/~1users~1{id}'
+  
+  /dashboard/admin:
+    $ref: './dashboard.yaml#/paths/~1dashboard~1admin'

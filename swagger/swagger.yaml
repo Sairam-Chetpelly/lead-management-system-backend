@@ -1,0 +1,334 @@
+openapi: 3.0.0
+info:
+  title: Lead Management System API
+  version: 1.0.0
+  description: Complete API documentation for LMS backend
+
+servers:
+  - url: http://localhost:5000/api
+    description: Development server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        current:
+          type: integer
+        pages:
+          type: integer
+        total:
+          type: integer
+        limit:
+          type: integer
+
+security:
+  - bearerAuth: []
+    apiKey: []
+
+tags:
+  - name: Authentication
+  - name: Admin
+  - name: Leads
+  - name: Users
+  - name: Dashboard
+
+paths:
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: User login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Success
+        '401':
+          description: Invalid credentials
+
+  /auth/status:
+    get:
+      tags: [Authentication]
+      summary: Check user status
+      responses:
+        '200':
+          description: Success
+
+  /admin/roles:
+    get:
+      tags: [Admin]
+      summary: Get all roles
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success
+    post:
+      tags: [Admin]
+      summary: Create role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name:
+                  type: string
+                slug:
+                  type: string
+      responses:
+        '201':
+          description: Created
+
+  /admin/centres:
+    get:
+      tags: [Admin]
+      summary: Get all centres
+      responses:
+        '200':
+          description: Success
+    post:
+      tags: [Admin]
+      summary: Create centre
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name:
+                  type: string
+                slug:
+                  type: string
+      responses:
+        '201':
+          description: Created
+
+  /leads:
+    get:
+      tags: [Leads]
+      summary: Get all leads
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Success
+    post:
+      tags: [Leads]
+      summary: Create lead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contactNumber, assignmentType, leadSourceId]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                contactNumber:
+                  type: string
+                  pattern: '^\d{10}$'
+                assignmentType:
+                  type: string
+                  enum: [presales, sales]
+                leadSourceId:
+                  type: string
+      responses:
+        '201':
+          description: Created
+
+  /leads/{id}:
+    get:
+      tags: [Leads]
+      summary: Get lead by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+    put:
+      tags: [Leads]
+      summary: Update lead
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [Leads]
+      summary: Delete lead
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+
+  /leads/bulk-upload:
+    post:
+      tags: [Leads]
+      summary: Bulk upload presales leads
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Uploaded
+
+  /leads/export:
+    get:
+      tags: [Leads]
+      summary: Export leads
+      responses:
+        '200':
+          description: CSV data
+
+  /users:
+    get:
+      tags: [Users]
+      summary: Get all users
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success
+    post:
+      tags: [Users]
+      summary: Create user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, roleId, statusId]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+                roleId:
+                  type: string
+                statusId:
+                  type: string
+      responses:
+        '201':
+          description: Created
+
+  /dashboard/admin:
+    get:
+      tags: [Dashboard]
+      summary: Get dashboard data
+      parameters:
+        - name: userType
+          in: query
+          schema:
+            type: string
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Success

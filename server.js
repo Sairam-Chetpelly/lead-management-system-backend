@@ -3,6 +3,8 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
+const swaggerUi = require('swagger-ui-express');
+const YAML = require('yamljs');
 require('dotenv').config();
 process.env.TZ = 'Asia/Kolkata';
 
@@ -81,6 +83,10 @@ mongoose.connect(process.env.MONGODB_URI)
     // startTokenScheduler();
   })
   .catch(err => console.error('MongoDB connection error:', err));
+
+// Swagger Documentation
+const swaggerDocument = YAML.load(path.join(__dirname, 'swagger/swagger.yaml'));
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Routes
 app.get('/api/health', (req, res) => {
