@@ -3,8 +3,6 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
-const swaggerUi = require('swagger-ui-express');
-const YAML = require('yamljs');
 require('dotenv').config();
 process.env.TZ = 'Asia/Kolkata';
 
@@ -27,6 +25,7 @@ const metaRoutes = require('./routes/meta');
 const documentRoutes = require('./routes/documents');
 const folderRoutes = require('./routes/folders');
 const keywordRoutes = require('./routes/keywords');
+const v1Routes = require('./routes/v1');
 const { startTokenScheduler } = require('./utils/tokenScheduler');
 
 const app = express();
@@ -67,9 +66,9 @@ const userLimiter = rateLimit({
 app.use('/api/auth', publicLimiter);
 app.use('/api', userLimiter);
 
-// API Key protection for all routes except health check, document serving, and webhooks
+// API Key protection for all routes except health check, document serving, webhooks, and v1 auth
 app.use('/api', (req, res, next) => {
-  if (req.path === '/health' || req.path.startsWith('/leads/document/') || req.path.startsWith('/leads/webhook/')) {
+  if (req.path === '/health' || req.path.startsWith('/leads/document/') || req.path.startsWith('/leads/webhook/') || req.path.startsWith('/v1/auth')) {
     return next();
   }
   apiKeyAuth(req, res, next);
@@ -83,10 +82,6 @@ mongoose.connect(process.env.MONGODB_URI)
     // startTokenScheduler();
   })
   .catch(err => console.error('MongoDB connection error:', err));
-
-// Swagger Documentation
-const swaggerDocument = YAML.load(path.join(__dirname, 'swagger/swagger.yaml'));
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Routes
 app.get('/api/health', (req, res) => {
@@ -108,6 +103,9 @@ app.use('/api/meta', metaRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/folders', folderRoutes);
 app.use('/api/keywords', keywordRoutes);
+
+// V1 API Routes
+app.use('/api/v1', v1Routes);
 
 // For Vercel deployment
 module.exports = app;
