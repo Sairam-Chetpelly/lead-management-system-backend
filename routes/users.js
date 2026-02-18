@@ -90,10 +90,10 @@ router.get('/', authenticateToken, async (req, res) => {
     
     const [users, total] = await Promise.all([
       User.find(filter)
-        .populate('roleId')
-        .populate('statusId')
-        .populate('centreId')
-        .populate('languageIds')
+      .populate('roleId', 'name slug')
+      .populate('statusId', 'name slug')
+      .populate('centreId', 'name slug')
+      .populate('languageIds', 'name slug code')
         .select('-password')
         .skip(skip)
         .limit(parseInt(limit))
@@ -185,10 +185,10 @@ router.get('/all', authenticateToken, async (req, res) => {
     
     const [users, total] = await Promise.all([
       User.find(filter)
-        .populate('roleId')
-        .populate('statusId')
-        .populate('centreId')
-        .populate('languageIds')
+      .populate('roleId', 'name slug')
+      .populate('statusId', 'name slug')
+      .populate('centreId', 'name slug')
+      .populate('languageIds', 'name slug code')
         .select('-password')
         .skip(skip)
         .limit(parseInt(limit))
@@ -306,10 +306,10 @@ router.post('/', authenticateToken, [
     await user.save();
     
     const populatedUser = await User.findById(user._id)
-      .populate('roleId')
-      .populate('statusId')
-      .populate('centreId')
-      .populate('languageIds')
+      .populate('roleId', 'name slug')
+      .populate('statusId', 'name slug')
+      .populate('centreId', 'name slug')
+      .populate('languageIds', 'name slug code')
       .select('-password');
     
     return successResponse(res, populatedUser, 'User created successfully', 201);
@@ -365,10 +365,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
     await user.save();
     
     const updatedUser = await User.findById(user._id)
-      .populate('roleId')
-      .populate('statusId')
-      .populate('centreId')
-      .populate('languageIds')
+      .populate('roleId', 'name slug')
+      .populate('statusId', 'name slug')
+      .populate('centreId', 'name slug')
+      .populate('languageIds', 'name slug code')
       .select('-password');
     
     return successResponse(res, updatedUser, 'User updated successfully', 200);

@@ -225,6 +225,28 @@ router.post('/centres', authenticateToken, [
   body('name').notEmpty().withMessage('Name is required'),
   body('slug').notEmpty().withMessage('Slug is required')
 ], centreController.create);
+router.get('/centres/:id', authenticateToken, async (req, res) => {
+  try {
+    const centre = await Centre.findOne({ _id: req.params.id, deletedAt: null });
+    
+    if (!centre) {
+      return errorResponse(res, 'Centre not found', 404);
+    }
+    
+    const [userCount, leadCount] = await Promise.all([
+      User.countDocuments({ centreId: centre._id, deletedAt: null }),
+      Lead.countDocuments({ centreId: centre._id, deletedAt: null })
+    ]);
+    
+    return successResponse(res, {
+      ...centre.toObject(),
+      userCount,
+      leadCount
+    }, 'Centre retrieved successfully', 200);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
 router.put('/centres/:id', authenticateToken, centreController.update);
 router.delete('/centres/:id', authenticateToken, async (req, res) => {
   try {
@@ -322,6 +344,28 @@ router.get('/languages', authenticateToken, async (req, res) => {
         limit: parseInt(limit)
       }
     }, 'Languages retrieved successfully', 200);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+router.get('/languages/:id', authenticateToken, async (req, res) => {
+  try {
+    const language = await Language.findOne({ _id: req.params.id, deletedAt: null });
+    
+    if (!language) {
+      return errorResponse(res, 'Language not found', 404);
+    }
+    
+    const [userCount, leadCount] = await Promise.all([
+      User.countDocuments({ languageIds: language._id, deletedAt: null }),
+      LeadActivity.countDocuments({ languageId: language._id, deletedAt: null })
+    ]);
+    
+    return successResponse(res, {
+      ...language.toObject(),
+      userCount,
+      leadCount
+    }, 'Language retrieved successfully', 200);
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
