@@ -166,4 +166,111 @@ router.post('/reset-password', [
   }
 });
 
+// Send OTP for password reset
+router.post('/forgot-password-otp', [
+  body('email').isEmail().withMessage('Please provide a valid email')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return errorResponse(res, 'Validation failed', 400, errors.array());
+    }
+
+    const { email } = req.body;
+    const { sendPasswordResetOTP } = require('../utils/emailService');
+    const user = await User.findOne({ email, deletedAt: null });
+    
+    if (!user) {
+      return errorResponse(res, 'User not found with this email', 404);
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiry = new Date(Date.now() + 600000); // 10 minutes
+    
+    user.resetPasswordOTP = otp;
+    user.resetPasswordOTPExpiry = otpExpiry;
+    await user.save();
+
+    await sendPasswordResetOTP(email, otp);
+
+    return successResponse(res, null, 'OTP sent successfully to your email');
+  } catch (error) {
+    console.error('Send OTP error:', error);
+    return errorResponse(res, 'Failed to send OTP', 500);
+  }
+});
+
+// Verify OTP
+router.post('/verify-otp', [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return errorResponse(res, 'Validation failed', 400, errors.array());
+    }
+
+    const { email, otp } = req.body;
+    const user = await User.findOne({
+      email,
+      resetPasswordOTP: otp,
+      resetPasswordOTPExpiry: { $gt: new Date() },
+      deletedAt: null
+    });
+    
+    if (!user) {
+      return errorResponse(res, 'Invalid or expired OTP', 400);
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenExpiry = new Date(Date.now() + 600000); // 10 minutes
+    
+    user.resetPasswordToken = resetToken;
+    user.resetPasswordExpiry = resetTokenExpiry;
+    await user.save();
+
+    return successResponse(res, { token: resetToken }, 'OTP verified successfully');
+  } catch (error) {
+    console.error('Verify OTP error:', error);
+    return errorResponse(res, 'Failed to verify OTP', 500);
+  }
+});
+
+// Reset password with token
+router.post('/reset-password-with-token', [
+  body('token').notEmpty().withMessage('Token is required'),
+  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return errorResponse(res, 'Validation failed', 400, errors.array());
+    }
+
+    const { token, password } = req.body;
+    const user = await User.findOne({
+      resetPasswordToken: token,
+      resetPasswordExpiry: { $gt: new Date() },
+      deletedAt: null
+    });
+    
+    if (!user) {
+      return errorResponse(res, 'Invalid or expired token', 400);
+    }
+
+    user.password = password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpiry = undefined;
+    user.resetPasswordOTP = undefined;
+    user.resetPasswordOTPExpiry = undefined;
+    await user.save();
+
+    return successResponse(res, null, 'Password reset successfully');
+  } catch (error) {
+    console.error('Reset password with token error:', error);
+    return errorResponse(res, 'Failed to reset password', 500);
+  }
+});
+
 module.exports = router;

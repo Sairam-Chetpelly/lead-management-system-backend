@@ -170,3 +170,110 @@ Reset password using token from email.
 ```
 - `400`: Invalid or expired reset token
 - `500`: Failed to reset password
+
+---
+
+### 5. Forgot Password with OTP
+**POST** `/api/auth/forgot-password-otp`
+
+Request password reset OTP via email.
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "data": null,
+  "message": "OTP sent successfully to your email"
+}
+```
+
+**Error Responses:**
+- `400`: Validation errors
+- `404`: User not found
+- `500`: Failed to send OTP
+
+---
+
+### 6. Verify OTP
+**POST** `/api/auth/verify-otp`
+
+Verify OTP and receive reset token.
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "otp": "123456"
+}
+```
+
+**Validation:**
+- `email`: Valid email format (required)
+- `otp`: 6 digits (required)
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "token": "abc123def456..."
+  },
+  "message": "OTP verified successfully"
+}
+```
+
+**Error Responses:**
+- `400`: Validation errors or invalid/expired OTP
+- `500`: Failed to verify OTP
+
+---
+
+### 7. Reset Password with Token
+**POST** `/api/auth/reset-password-with-token`
+
+Reset password using token from OTP verification.
+
+**Request Body:**
+```json
+{
+  "token": "abc123def456...",
+  "password": "newPassword123"
+}
+```
+
+**Validation:**
+- `token`: Non-empty string (required)
+- `password`: Minimum 6 characters (required)
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "data": null,
+  "message": "Password reset successfully"
+}
+```
+
+**Error Responses:**
+- `400`: Validation errors or invalid/expired token
+- `500`: Failed to reset password
+
+---
+
+## OTP Password Reset Flow
+
+1. **Request OTP**: `POST /api/auth/forgot-password-otp` with email
+2. **Verify OTP**: `POST /api/auth/verify-otp` with email and OTP → Receive token
+3. **Reset Password**: `POST /api/auth/reset-password-with-token` with token and new password
+
+**Notes:**
+- OTP expires in 10 minutes
+- Reset token from OTP verification expires in 10 minutes
+- OTP is 6 digits

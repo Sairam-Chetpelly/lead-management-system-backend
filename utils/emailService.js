@@ -63,4 +63,53 @@ const sendPasswordResetEmail = async (email, resetToken) => {
   });
 };
 
-module.exports = { sendPasswordResetEmail };
+const sendPasswordResetOTP = async (email, otp) => {
+  await transporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: 'Password Reset OTP',
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Password Reset OTP</title>
+      </head>
+      <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 20px;">
+          <div style="text-align: center; padding: 20px 0; border-bottom: 2px solid #0f172a;">
+            <h1 style="color: #0f172a; margin: 0; font-size: 24px;">Password Reset OTP</h1>
+          </div>
+          <div style="padding: 30px 20px;">
+            <p style="color: #333333; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">Hello,</p>
+            <p style="color: #333333; font-size: 16px; line-height: 1.6; margin-bottom: 25px;">
+              We received a request to reset your password. Please use the following OTP to proceed:
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+              <div style="display: inline-block; background-color: #f8f9fa; padding: 20px 40px; border-radius: 8px; border: 2px dashed #0f172a;">
+                <span style="font-size: 32px; font-weight: bold; color: #0f172a; letter-spacing: 8px;">${otp}</span>
+              </div>
+            </div>
+            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 25px 0;">
+              <p style="color: #666666; font-size: 14px; margin: 0; line-height: 1.5;">
+                <strong>Security Notice:</strong> This OTP will expire in 10 minutes. Do not share this OTP with anyone.
+              </p>
+            </div>
+            <p style="color: #333333; font-size: 16px; line-height: 1.6; margin-bottom: 10px;">
+              If you didn't request this password reset, please ignore this email. Your password will remain unchanged.
+            </p>
+          </div>
+          <div style="border-top: 1px solid #e9ecef; padding: 20px; text-align: center;">
+            <p style="color: #666666; font-size: 12px; margin: 0;">
+              This is an automated message. Please do not reply to this email.
+            </p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+  });
+};
+
+module.exports = { sendPasswordResetEmail, sendPasswordResetOTP };
