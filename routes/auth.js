@@ -184,7 +184,7 @@ router.post('/forgot-password-otp', [
       return errorResponse(res, 'User not found with this email', 404);
     }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = Math.floor(1000 + Math.random() * 9999).toString();
     const otpExpiry = new Date(Date.now() + 600000); // 10 minutes
     
     user.resetPasswordOTP = otp;
@@ -203,7 +203,7 @@ router.post('/forgot-password-otp', [
 // Verify OTP
 router.post('/verify-otp', [
   body('email').isEmail().withMessage('Please provide a valid email'),
-  body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
+  body('otp').isLength({ min: 4, max: 4 }).withMessage('OTP must be 4 digits')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
