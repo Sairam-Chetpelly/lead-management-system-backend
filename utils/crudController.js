@@ -1,4 +1,5 @@
 const { validationResult } = require('express-validator');
+const { successResponse, errorResponse } = require('./response');
 
 /**
  * Generic CRUD controller factory
@@ -36,17 +37,21 @@ const createCrudController = (Model, entityName, csvFields = []) => {
           Model.countDocuments(filter)
         ]);
         
-        res.json({
-          data: items,
+        const pluralName = entityName.toLowerCase().endsWith('s') 
+          ? entityName.toLowerCase() + 'es'
+          : entityName.toLowerCase() + 's';
+        
+        return successResponse(res, {
+          [pluralName]: items,
           pagination: {
             current: parseInt(page),
             pages: Math.ceil(total / parseInt(limit)),
             total,
             limit: parseInt(limit)
           }
-        });
+        }, `${entityName}s retrieved successfully`);
       } catch (error) {
-        res.status(500).json({ error: error.message });
+        return errorResponse(res, error.message, 500);
       }
     },
 
@@ -56,9 +61,9 @@ const createCrudController = (Model, entityName, csvFields = []) => {
         const items = await Model.find({ deletedAt: null })
           .select('_id name slug code type')
           .sort({ name: 1 });
-        res.json({ data: items });
+        return successResponse(res, items, `${entityName}s retrieved successfully`);
       } catch (error) {
-        res.status(500).json({ error: error.message });
+        return errorResponse(res, error.message, 500);
       }
     },
 
@@ -67,11 +72,11 @@ const createCrudController = (Model, entityName, csvFields = []) => {
       try {
         const item = await Model.findById(req.params.id);
         if (!item || item.deletedAt) {
-          return res.status(404).json({ error: `${entityName} not found` });
+          return errorResponse(res, `${entityName} not found`, 404);
         }
-        res.json(item);
+        return successResponse(res, item, `${entityName} retrieved successfully`);
       } catch (error) {
-        res.status(500).json({ error: error.message });
+        return errorResponse(res, error.message, 500);
       }
     },
 
@@ -80,20 +85,18 @@ const createCrudController = (Model, entityName, csvFields = []) => {
       try {
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
-          return res.status(400).json({ errors: errors.array() });
+          return errorResponse(res, 'Validation failed', 400, errors.array());
         }
 
         const item = new Model(req.body);
         await item.save();
-        res.status(201).json(item);
+        return successResponse(res, item, `${entityName} created successfully`, 201);
       } catch (error) {
         if (error.code === 11000) {
           const field = Object.keys(error.keyPattern)[0];
-          return res.status(400).json({ 
-            error: `${field.charAt(0).toUpperCase() + field.slice(1)} already exists` 
-          });
+          return errorResponse(res, `${field.charAt(0).toUpperCase() + field.slice(1)} already exists`, 400);
         }
-        res.status(400).json({ error: error.message });
+        return errorResponse(res, error.message, 400);
       }
     },
 
@@ -102,7 +105,7 @@ const createCrudController = (Model, entityName, csvFields = []) => {
       try {
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
-          return res.status(400).json({ errors: errors.array() });
+          return errorResponse(res, 'Validation failed', 400, errors.array());
         }
 
         const item = await Model.findByIdAndUpdate(
@@ -112,18 +115,16 @@ const createCrudController = (Model, entityName, csvFields = []) => {
         );
         
         if (!item || item.deletedAt) {
-          return res.status(404).json({ error: `${entityName} not found` });
+          return errorResponse(res, `${entityName} not found`, 404);
         }
         
-        res.json(item);
+        return successResponse(res, item, `${entityName} updated successfully`);
       } catch (error) {
         if (error.code === 11000) {
           const field = Object.keys(error.keyPattern)[0];
-          return res.status(400).json({ 
-            error: `${field.charAt(0).toUpperCase() + field.slice(1)} already exists` 
-          });
+          return errorResponse(res, `${field.charAt(0).toUpperCase() + field.slice(1)} already exists`, 400);
         }
-        res.status(400).json({ error: error.message });
+        return errorResponse(res, error.message, 400);
       }
     },
 
@@ -137,12 +138,12 @@ const createCrudController = (Model, entityName, csvFields = []) => {
         );
         
         if (!item) {
-          return res.status(404).json({ error: `${entityName} not found` });
+          return errorResponse(res, `${entityName} not found`, 404);
         }
         
-        res.json({ message: `${entityName} deleted successfully` });
+        return successResponse(res, null, `${entityName} deleted successfully`);
       } catch (error) {
-        res.status(400).json({ error: error.message });
+        return errorResponse(res, error.message, 400);
       }
     },
 
@@ -163,9 +164,9 @@ const createCrudController = (Model, entityName, csvFields = []) => {
           return row;
         });
         
-        res.json(csvData);
+        return successResponse(res, csvData, `${entityName}s exported successfully`);
       } catch (error) {
-        res.status(500).json({ error: error.message });
+        return errorResponse(res, error.message, 500);
       }
     }
   };

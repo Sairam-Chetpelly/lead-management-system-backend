@@ -1,5 +1,6 @@
 const Folder = require('../models/Folder');
 const Document = require('../models/Document');
+const { successResponse, errorResponse } = require('../utils/response');
 
 // Create folder
 exports.createFolder = async (req, res) => {
@@ -14,9 +15,9 @@ exports.createFolder = async (req, res) => {
 
     await folder.save();
     await folder.populate('createdBy', 'name email');
-    res.status(201).json(folder);
+    return successResponse(res, folder, 'Folder created successfully', 201);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -30,9 +31,9 @@ exports.getFolders = async (req, res) => {
     })
       .populate('createdBy', 'name email')
       .sort({ createdAt: -1 });
-    res.json(folders);
+    return successResponse(res, { folders }, 'Folders retrieved successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -44,16 +45,16 @@ exports.getFolderContents = async (req, res) => {
       .populate('createdBy', 'name email');
     
     if (!folder) {
-      return res.status(404).json({ error: 'Folder not found' });
+      return errorResponse(res, 'Folder not found', 404);
     }
 
     const subfolders = await Folder.find({ parentFolderId: id, deletedAt: null });
     const documents = await Document.find({ folderId: id, deletedAt: null })
       .populate('uploadedBy', 'name email');
 
-    res.json({ folder, subfolders, documents });
+    return successResponse(res, { folder, subfolders, documents }, 'Folder contents retrieved successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -68,11 +69,11 @@ exports.updateFolder = async (req, res) => {
     ).populate('createdBy', 'name email');
 
     if (!folder) {
-      return res.status(404).json({ error: 'Folder not found' });
+      return errorResponse(res, 'Folder not found', 404);
     }
-    res.json(folder);
+    return successResponse(res, folder, 'Folder updated successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -81,10 +82,9 @@ exports.deleteFolder = async (req, res) => {
   try {
     const folder = await Folder.findById(req.params.id);
     if (!folder) {
-      return res.status(404).json({ error: 'Folder not found' });
+      return errorResponse(res, 'Folder not found', 404);
     }
 
-    // Soft delete folder and all subfolders/documents
     await Folder.updateMany(
       { parentFolderId: folder._id },
       { deletedAt: new Date() }
@@ -96,8 +96,8 @@ exports.deleteFolder = async (req, res) => {
     
     folder.deletedAt = new Date();
     await folder.save();
-    res.json({ message: 'Folder deleted successfully' });
+    return successResponse(res, null, 'Folder deleted successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };

@@ -1,4 +1,5 @@
 const Keyword = require('../models/Keyword');
+const { successResponse, errorResponse } = require('../utils/response');
 
 // Create keyword
 exports.createKeyword = async (req, res) => {
@@ -7,13 +8,13 @@ exports.createKeyword = async (req, res) => {
     
     const existing = await Keyword.findOne({ name: name.toLowerCase() });
     if (existing) {
-      return res.status(400).json({ error: 'Keyword already exists' });
+      return errorResponse(res, 'Keyword already exists', 400);
     }
 
     const keyword = await Keyword.create({ name: name.toLowerCase() });
-    res.status(201).json(keyword);
+    return successResponse(res, keyword, 'Keyword created successfully', 201);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -24,22 +25,18 @@ exports.getAllKeywords = async (req, res) => {
     
     const query = {};
     
-    // Search filter
     if (search) {
       query.name = { $regex: search, $options: 'i' };
     }
     
-    // If no pagination params, return all keywords
     if (!page && !limit) {
       const keywords = await Keyword.find(query).sort({ [sortBy]: sortOrder === 'asc' ? 1 : -1 });
-      return res.json({ keywords });
+      return successResponse(res, { keywords }, 'Keywords retrieved successfully');
     }
     
-    // Build sort object
     const sort = {};
     sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
     
-    // Execute query with pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const keywords = await Keyword.find(query)
       .sort(sort)
@@ -48,7 +45,7 @@ exports.getAllKeywords = async (req, res) => {
     
     const total = await Keyword.countDocuments(query);
     
-    res.json({
+    return successResponse(res, {
       keywords,
       pagination: {
         current: parseInt(page),
@@ -56,9 +53,9 @@ exports.getAllKeywords = async (req, res) => {
         total,
         pages: Math.ceil(total / parseInt(limit))
       }
-    });
+    }, 'Keywords retrieved successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -67,11 +64,11 @@ exports.getKeyword = async (req, res) => {
   try {
     const keyword = await Keyword.findById(req.params.id);
     if (!keyword) {
-      return res.status(404).json({ error: 'Keyword not found' });
+      return errorResponse(res, 'Keyword not found', 404);
     }
-    res.json(keyword);
+    return successResponse(res, keyword, 'Keyword retrieved successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -85,7 +82,7 @@ exports.updateKeyword = async (req, res) => {
       _id: { $ne: req.params.id } 
     });
     if (existing) {
-      return res.status(400).json({ error: 'Keyword already exists' });
+      return errorResponse(res, 'Keyword already exists', 400);
     }
 
     const keyword = await Keyword.findByIdAndUpdate(
@@ -95,11 +92,11 @@ exports.updateKeyword = async (req, res) => {
     );
     
     if (!keyword) {
-      return res.status(404).json({ error: 'Keyword not found' });
+      return errorResponse(res, 'Keyword not found', 404);
     }
-    res.json(keyword);
+    return successResponse(res, keyword, 'Keyword updated successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -108,10 +105,10 @@ exports.deleteKeyword = async (req, res) => {
   try {
     const keyword = await Keyword.findByIdAndDelete(req.params.id);
     if (!keyword) {
-      return res.status(404).json({ error: 'Keyword not found' });
+      return errorResponse(res, 'Keyword not found', 404);
     }
-    res.json({ message: 'Keyword deleted successfully' });
+    return successResponse(res, null, 'Keyword deleted successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };

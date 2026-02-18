@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const ProjectAndHouseType = require('../models/ProjectAndHouseType');
+const { successResponse, errorResponse } = require('../utils/response');
 
 // GET export project and house types
 router.get('/export', async (req, res) => {
@@ -15,9 +16,9 @@ router.get('/export', async (req, res) => {
       'Created': type.createdAt
     }));
     
-    res.json(csvData);
+    return successResponse(res, csvData, 'Project and house types exported successfully', 200);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -47,17 +48,17 @@ router.get('/', async (req, res) => {
       ProjectAndHouseType.countDocuments(filter)
     ]);
     
-    res.json({
-      data: types,
+    return successResponse(res, {
+      types,
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
         total,
         limit: parseInt(limit)
       }
-    });
+    }, 'Project and house types retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -66,11 +67,11 @@ router.get('/:id', async (req, res) => {
   try {
     const type = await ProjectAndHouseType.findById(req.params.id);
     if (!type || type.deletedAt) {
-      return res.status(404).json({ message: 'Type not found' });
+      return errorResponse(res, 'Type not found', 404);
     }
-    res.json(type);
+    return successResponse(res, type, 'Type retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -79,9 +80,9 @@ router.post('/', async (req, res) => {
   try {
     const type = new ProjectAndHouseType(req.body);
     const savedType = await type.save();
-    res.status(201).json(savedType);
+    return successResponse(res, savedType, 'Type created successfully', 201);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    return errorResponse(res, error.message, 400);
   }
 });
 
@@ -94,11 +95,11 @@ router.put('/:id', async (req, res) => {
       { new: true, runValidators: true }
     );
     if (!type || type.deletedAt) {
-      return res.status(404).json({ message: 'Type not found' });
+      return errorResponse(res, 'Type not found', 404);
     }
-    res.json(type);
+    return successResponse(res, type, 'Type updated successfully', 200);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    return errorResponse(res, error.message, 400);
   }
 });
 
@@ -109,7 +110,7 @@ router.delete('/:id', async (req, res) => {
     
     const type = await ProjectAndHouseType.findById(typeId);
     if (!type || type.deletedAt) {
-      return res.status(404).json({ message: 'Type not found' });
+      return errorResponse(res, 'Type not found', 404);
     }
     
     const LeadActivity = require('../models/LeadActivity');
@@ -122,9 +123,7 @@ router.delete('/:id', async (req, res) => {
     });
     
     if (leadCount > 0) {
-      return res.status(400).json({ 
-        error: `Cannot delete ${type.type} "${type.name}". This ${type.type} has ${leadCount} lead${leadCount > 1 ? 's' : ''}. Please reassign or remove them first.` 
-      });
+      return errorResponse(res, `Cannot delete ${type.type} "${type.name}". This ${type.type} has ${leadCount} lead${leadCount > 1 ? 's' : ''}. Please reassign or remove them first.`, 400);
     }
     
     await ProjectAndHouseType.findByIdAndUpdate(
@@ -133,9 +132,9 @@ router.delete('/:id', async (req, res) => {
       { new: true }
     );
     
-    res.json({ message: `${type.type} deleted successfully` });
+    return successResponse(res, null, `${type.type} deleted successfully`, 200);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 

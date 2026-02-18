@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const crypto = require('crypto');
+const { successResponse, errorResponse } = require('../utils/response');
 const router = express.Router();
 
 // Login
@@ -13,7 +14,7 @@ router.post('/login', [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return errorResponse(res, 'Validation failed', 400, errors.array());
     }
 
     const { email, password } = req.body;
@@ -23,11 +24,11 @@ router.post('/login', [
       .populate('statusId');
     
     if (!user || !(await user.comparePassword(password))) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return errorResponse(res, 'Invalid credentials', 401);
     }
 
     // if (user.statusId.slug !== 'active') {
-    //   return res.status(401).json({ error: 'Account is not active' });
+    //   return errorResponse(res, 'Account is not active', 401);
     // }
 
     const expiresIn = '24h';
@@ -37,9 +38,9 @@ router.post('/login', [
       { expiresIn }
     );
 
-    const expiryTime = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
+    const expiryTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    res.json({
+    return successResponse(res, {
       token,
       expiresAt: expiryTime.getTime(),
       user: {
@@ -49,9 +50,9 @@ router.post('/login', [
         role: user.roleId.slug,
         status: user.statusId.slug
       }
-    });
+    }, 'Login successful');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -62,7 +63,7 @@ router.get('/status', async (req, res) => {
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) {
-      return res.status(401).json({ error: 'No token provided' });
+      return errorResponse(res, 'No token provided', 401);
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -71,17 +72,16 @@ router.get('/status', async (req, res) => {
       .populate('roleId');
 
     if (!user || user.deletedAt) {
-      return res.status(401).json({ error: 'User not found' });
+      return errorResponse(res, 'User not found', 401);
     }
 
-    // Ensure statusId is populated
     if (!user.statusId) {
-      return res.status(500).json({ error: 'User status not found' });
+      return errorResponse(res, 'User status not found', 500);
     }
 
     const isActive = user.statusId.slug === 'active';
     
-    res.json({
+    return successResponse(res, {
       isActive,
       status: user.statusId.slug,
       user: {
@@ -91,10 +91,10 @@ router.get('/status', async (req, res) => {
         role: user.roleId?.slug || 'unknown',
         status: user.statusId.slug
       }
-    });
+    }, 'Status retrieved successfully');
   } catch (error) {
     console.error('Status check error:', error);
-    res.status(401).json({ error: 'Invalid token' });
+    return errorResponse(res, 'Invalid token', 401);
   }
 });
 
@@ -105,7 +105,7 @@ router.post('/forgot-password', [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return errorResponse(res, 'Validation failed', 400, errors.array());
     }
 
     const { email } = req.body;
@@ -113,7 +113,7 @@ router.post('/forgot-password', [
     const user = await User.findOne({ email, deletedAt: null });
     
     if (!user) {
-      return res.status(404).json({ error: 'User not found with this email' });
+      return errorResponse(res, 'User not found with this email', 404);
     }
 
     const resetToken = crypto.randomBytes(32).toString('hex');
@@ -125,10 +125,10 @@ router.post('/forgot-password', [
 
     await sendPasswordResetEmail(email, resetToken);
 
-    res.json({ message: 'Password reset email sent successfully' });
+    return successResponse(res, null, 'Password reset email sent successfully');
   } catch (error) {
     console.error('Forgot password error:', error);
-    res.status(500).json({ error: 'Failed to send reset email' });
+    return errorResponse(res, 'Failed to send reset email', 500);
   }
 });
 
@@ -140,7 +140,7 @@ router.post('/reset-password', [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return errorResponse(res, 'Validation failed', 400, errors.array());
     }
 
     const { token, password } = req.body;
@@ -151,7 +151,7 @@ router.post('/reset-password', [
     });
     
     if (!user) {
-      return res.status(400).json({ error: 'Invalid or expired reset token' });
+      return errorResponse(res, 'Invalid or expired reset token', 400);
     }
 
     user.password = password;
@@ -159,10 +159,10 @@ router.post('/reset-password', [
     user.resetPasswordExpiry = undefined;
     await user.save();
 
-    res.json({ message: 'Password reset successfully' });
+    return successResponse(res, null, 'Password reset successfully');
   } catch (error) {
     console.error('Reset password error:', error);
-    res.status(500).json({ error: 'Failed to reset password' });
+    return errorResponse(res, 'Failed to reset password', 500);
   }
 });
 

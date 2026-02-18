@@ -12,7 +12,7 @@ Analytics and reporting endpoints providing comprehensive dashboard metrics, cha
 ## Main Dashboard
 
 ### Get Admin Dashboard
-**GET** `/api/dashboard/admin`
+**GET** `/api/dashboard`
 
 **Query Parameters:**
 - `userType`: Filter by user type ("presales", "sales", or empty for all)
@@ -174,7 +174,7 @@ Available for admin and marketing roles:
 ## Utility Endpoints
 
 ### Get All Sources
-**GET** `/api/dashboard/admin/sources`
+**GET** `/api/dashboard/sources`
 
 Returns all lead sources for dropdown.
 
@@ -193,12 +193,12 @@ Returns all lead sources for dropdown.
 ```
 
 ### Get All Centres
-**GET** `/api/dashboard/admin/centres`
+**GET** `/api/dashboard/centres`
 
 Returns all centres for dropdown.
 
 ### Get Users by Type
-**GET** `/api/dashboard/admin/users/:type`
+**GET** `/api/dashboard/users/:type`
 
 **Path Parameters:**
 - `type`: "sales", "presales", or "all"
@@ -225,7 +225,7 @@ Returns users filtered by role type.
 
 Exports dashboard data as CSV.
 
-**Query Parameters:** Same as GET /api/dashboard/admin
+**Query Parameters:** Same as GET /api/dashboard
 
 **Response:** CSV file download
 

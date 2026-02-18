@@ -2,6 +2,7 @@ const express = require('express');
 const LeadActivity = require('../models/LeadActivity');
 const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
+const { successResponse, errorResponse } = require('../utils/response');
 
 const router = express.Router();
 
@@ -68,7 +69,7 @@ router.get('/', authenticateToken, async (req, res) => {
       LeadActivity.countDocuments(filter)
     ]);
 
-    res.json({
+    return successResponse(res, {
       leadActivities,
       pagination: {
         current: page,
@@ -76,10 +77,10 @@ router.get('/', authenticateToken, async (req, res) => {
         total,
         pages: Math.ceil(total / limit)
       }
-    });
+    }, 'Lead activities retrieved successfully', 200);
   } catch (error) {
     console.error('Error fetching lead activities:', error);
-    res.status(500).json({ error: 'Failed to fetch lead activities' });
+    return errorResponse(res, 'Failed to fetch lead activities', 500);
   }
 });
 
@@ -220,10 +221,10 @@ router.get('/export', authenticateToken, async (req, res) => {
       'Updated At': new Date(activity.updatedAt).toLocaleString()
     }));
 
-    res.json(csvData);
+    return successResponse(res, csvData, 'Lead activities exported successfully', 200);
   } catch (error) {
     console.error('Error exporting lead activities:', error);
-    res.status(500).json({ error: 'Failed to export lead activities' });
+    return errorResponse(res, 'Failed to export lead activities', 500);
   }
 });
 

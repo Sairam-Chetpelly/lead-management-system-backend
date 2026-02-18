@@ -1,6 +1,6 @@
 # Authentication API Documentation
 
-Base URL: `/api/v1/auth`
+Base URL: `/api/auth`
 
 ## Overview
 Authentication endpoints for user login, password management, and session validation.
@@ -10,7 +10,7 @@ Authentication endpoints for user login, password management, and session valida
 ## Endpoints
 
 ### 1. Login
-**POST** `/api/v1/auth/login`
+**POST** `/api/auth/login`
 
 Authenticate user and receive JWT token.
 
@@ -59,7 +59,7 @@ Authenticate user and receive JWT token.
 ---
 
 ### 2. Check User Status
-**GET** `/api/v1/auth/status`
+**GET** `/api/auth/status`
 
 Verify JWT token validity and get current user status.
 
@@ -99,7 +99,7 @@ Authorization: Bearer <token>
 ---
 
 ### 3. Forgot Password
-**POST** `/api/v1/auth/forgot-password`
+**POST** `/api/auth/forgot-password`
 
 Request password reset email with reset token.
 
@@ -135,7 +135,7 @@ Request password reset email with reset token.
 ---
 
 ### 4. Reset Password
-**POST** `/api/v1/auth/reset-password`
+**POST** `/api/auth/reset-password`
 
 Reset password using token from email.
 

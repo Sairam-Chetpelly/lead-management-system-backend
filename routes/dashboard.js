@@ -7,11 +7,12 @@ const Status = require('../models/Status');
 const User = require('../models/User');
 const Role = require('../models/Role');
 const { authenticateToken } = require('../middleware/auth');
+const { successResponse, errorResponse } = require('../utils/response');
 
 const router = express.Router();
 
 // Admin dashboard
-router.get('/admin', authenticateToken, async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
@@ -389,33 +390,28 @@ router.get('/admin', authenticateToken, async (req, res) => {
       }
     }
 
-    res.json({
-      // Card metrics
+    return successResponse(res, {
       totalLeads, leadsMTD, leadsToday,
       totalCalls, callsMTD, callsToday,
       totalQualified, qualifiedMTD, qualifiedToday,
       totalLost, lostMTD, lostToday,
       totalWon, wonMTD, wonToday,
-      // Visit and meeting metrics
       siteVisits, centerVisits, virtualMeetings,
-      // Charts data
       dailyLeads, dailyCalls, dailyQualified, dailyLost, dailyWon,
       dailySiteVisits, dailyCenterVisits, dailyVirtualMeetings,
       sourceLeads, sourceQualified, sourceWon,
-      // Agent-specific charts
       dailyQualificationRate, dailyCallsPerLead,
-      // New tables for admin and marketing
       centerWonData, sourceCenterData,
       role: userRole,
       showFilters: userRole !== 'presales_agent'
-    });
+    }, 'Dashboard data retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch admin dashboard' });
+    return errorResponse(res, 'Failed to fetch admin dashboard', 500);
   }
 });
 
 // Get all sources for admin dashboard dropdown
-router.get('/admin/sources', authenticateToken, async (req, res) => {
+router.get('/sources', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
     // if (!['admin', 'marketing'].includes(user?.roleId?.slug)) {
@@ -424,27 +420,27 @@ router.get('/admin/sources', authenticateToken, async (req, res) => {
 
     const LeadSource = require('../models/LeadSource');
     const sources = await LeadSource.find({ deletedAt: null }).select('_id name').sort({ name: 1 });
-    res.json(sources);
+    return successResponse(res, sources, 'Sources retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch sources' });
+    return errorResponse(res, 'Failed to fetch sources', 500);
   }
 });
 
 // Get all centres for admin dashboard dropdown
-router.get('/admin/centres', authenticateToken, async (req, res) => {
+router.get('/centres', authenticateToken, async (req, res) => {
   try {
     const Centre = require('../models/Centre');
     const centres = await Centre.find({ deletedAt: null }).select('_id name').sort({ name: 1 });
-    res.json(centres);
+    return successResponse(res, centres, 'Centres retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch centres' });
+    return errorResponse(res, 'Failed to fetch centres', 500);
   }
 });
 
 // Export dashboard data
 router.get('/export', authenticateToken, async (req, res) => {
   try {
-    const dashboardReq = { ...req, url: '/api/dashboard/admin', query: req.query };
+    const dashboardReq = { ...req, url: '/api/dashboard', query: req.query };
     const dashboardRes = { json: (data) => data };
     
     const adminHandler = router.stack.find(r => r.route?.path === '/admin')?.route?.stack[0]?.handle;
@@ -503,12 +499,12 @@ router.get('/export', authenticateToken, async (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename=dashboard-export.csv');
     res.send(csv);
   } catch (error) {
-    res.status(500).json({ error: 'Export failed' });
+    return errorResponse(res, 'Export failed', 500);
   }
 });
 
 // Get users by type for admin dashboard
-router.get('/admin/users/:type', authenticateToken, async (req, res) => {
+router.get('/users/:type', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
@@ -536,9 +532,9 @@ router.get('/admin/users/:type', authenticateToken, async (req, res) => {
     }
 
     const users = await User.find({ ...roleFilter, deletedAt: null }).select('_id name email').sort({ name: 1 });
-    res.json(users);
+    return successResponse(res, users, 'Users retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch users' });
+    return errorResponse(res, 'Failed to fetch users', 500);
   }
 });
 

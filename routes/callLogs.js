@@ -1,6 +1,7 @@
 const express = require('express');
 const CallLog = require('../models/CallLog');
 const { authenticateToken } = require('../middleware/auth');
+const { successResponse, errorResponse } = require('../utils/response');
 
 const router = express.Router();
 
@@ -55,7 +56,7 @@ router.get('/', authenticateToken, async (req, res) => {
       CallLog.countDocuments(filter)
     ]);
 
-    res.json({
+    return successResponse(res, {
       callLogs,
       pagination: {
         current: page,
@@ -63,10 +64,10 @@ router.get('/', authenticateToken, async (req, res) => {
         total,
         pages: Math.ceil(total / limit)
       }
-    });
+    }, 'Call logs retrieved successfully', 200);
   } catch (error) {
     console.error('Error fetching call logs:', error);
-    res.status(500).json({ error: 'Failed to fetch call logs' });
+    return errorResponse(res, 'Failed to fetch call logs', 500);
   }
 });
 

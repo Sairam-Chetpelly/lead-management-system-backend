@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const LeadSource = require('../models/LeadSource');
+const { successResponse, errorResponse } = require('../utils/response');
 
 // GET export lead sources
 router.get('/export', async (req, res) => {
@@ -27,9 +28,9 @@ router.get('/export', async (req, res) => {
       })
     );
     
-    res.json(csvData);
+    return successResponse(res, csvData, 'Lead sources exported successfully', 200);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -40,9 +41,9 @@ router.get('/all', async (req, res) => {
       .select('_id name slug')
       .sort({ name: 1 });
     
-    res.json(leadSources);
+    return successResponse(res, leadSources, 'Lead sources retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -91,17 +92,17 @@ router.get('/', async (req, res) => {
       })
     );
     
-    res.json({
-      data: leadSourcesWithCounts,
+    return successResponse(res, {
+      leadSources: leadSourcesWithCounts,
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
         total,
         limit: parseInt(limit)
       }
-    });
+    }, 'Lead sources retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -110,11 +111,11 @@ router.get('/:id', async (req, res) => {
   try {
     const leadSource = await LeadSource.findById(req.params.id);
     if (!leadSource || leadSource.deletedAt) {
-      return res.status(404).json({ message: 'Lead source not found' });
+      return errorResponse(res, 'Lead source not found', 404);
     }
-    res.json(leadSource);
+    return successResponse(res, leadSource, 'Lead source retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -123,9 +124,9 @@ router.post('/', async (req, res) => {
   try {
     const leadSource = new LeadSource(req.body);
     const savedLeadSource = await leadSource.save();
-    res.status(201).json(savedLeadSource);
+    return successResponse(res, savedLeadSource, 'Lead source created successfully', 201);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    return errorResponse(res, error.message, 400);
   }
 });
 
@@ -138,11 +139,11 @@ router.put('/:id', async (req, res) => {
       { new: true, runValidators: true }
     );
     if (!leadSource || leadSource.deletedAt) {
-      return res.status(404).json({ message: 'Lead source not found' });
+      return errorResponse(res, 'Lead source not found', 404);
     }
-    res.json(leadSource);
+    return successResponse(res, leadSource, 'Lead source updated successfully', 200);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    return errorResponse(res, error.message, 400);
   }
 });
 
@@ -153,7 +154,7 @@ router.delete('/:id', async (req, res) => {
     
     const leadSource = await LeadSource.findById(sourceId);
     if (!leadSource || leadSource.deletedAt) {
-      return res.status(404).json({ message: 'Lead source not found' });
+      return errorResponse(res, 'Lead source not found', 404);
     }
     
     const LeadActivity = require('../models/LeadActivity');
@@ -163,9 +164,7 @@ router.delete('/:id', async (req, res) => {
     });
     
     if (leadCount > 0) {
-      return res.status(400).json({ 
-        error: `Cannot delete lead source "${leadSource.name}". This lead source has ${leadCount} lead${leadCount > 1 ? 's' : ''}. Please reassign or remove them first.` 
-      });
+      return errorResponse(res, `Cannot delete lead source "${leadSource.name}". This lead source has ${leadCount} lead${leadCount > 1 ? 's' : ''}. Please reassign or remove them first.`, 400);
     }
     
     await LeadSource.findByIdAndUpdate(
@@ -174,9 +173,9 @@ router.delete('/:id', async (req, res) => {
       { new: true }
     );
     
-    res.json({ message: 'Lead source deleted successfully' });
+    return successResponse(res, null, 'Lead source deleted successfully', 200);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 

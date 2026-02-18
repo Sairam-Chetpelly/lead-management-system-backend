@@ -1,6 +1,7 @@
 const express = require('express');
 const ActivityLog = require('../models/ActivityLog');
 const { authenticateToken } = require('../middleware/auth');
+const { successResponse, errorResponse } = require('../utils/response');
 
 const router = express.Router();
 
@@ -59,7 +60,7 @@ router.get('/', authenticateToken, async (req, res) => {
       ActivityLog.countDocuments(filter)
     ]);
 
-    res.json({
+    return successResponse(res, {
       activityLogs,
       pagination: {
         current: page,
@@ -67,10 +68,10 @@ router.get('/', authenticateToken, async (req, res) => {
         total,
         pages: Math.ceil(total / limit)
       }
-    });
+    }, 'Activity logs retrieved successfully', 200);
   } catch (error) {
     console.error('Error fetching activity logs:', error);
-    res.status(500).json({ error: 'Failed to fetch activity logs' });
+    return errorResponse(res, 'Failed to fetch activity logs', 500);
   }
 });
 

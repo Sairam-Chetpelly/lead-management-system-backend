@@ -8,6 +8,7 @@ const Role = require('../models/Role');
 const Status = require('../models/Status');
 const Centre = require('../models/Centre');
 const { authenticateToken } = require('../middleware/auth');
+const { successResponse, errorResponse } = require('../utils/response');
 const router = express.Router();
 const Lead = require('../models/Lead');
 
@@ -101,7 +102,6 @@ router.get('/', authenticateToken, async (req, res) => {
     ]);
     
     // Get lead counts for sales and presales agents
-
     const usersWithLeadCounts = await Promise.all(
       users.map(async (user) => {
         const userObj = user.toObject();
@@ -133,19 +133,20 @@ router.get('/', authenticateToken, async (req, res) => {
       })
     );
     
-    res.json({
-      data: usersWithLeadCounts,
+    return successResponse(res, {
+      users: usersWithLeadCounts,
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
         total,
         limit: parseInt(limit)
       }
-    });
+    }, 'Users retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
+
 router.get('/all', authenticateToken, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '', role = '', status = '', centre = '' } = req.query;
@@ -196,7 +197,6 @@ router.get('/all', authenticateToken, async (req, res) => {
     ]);
     
     // Get lead counts for sales and presales agents
-
     const usersWithLeadCounts = await Promise.all(
       users.map(async (user) => {
         const userObj = user.toObject();
@@ -228,17 +228,17 @@ router.get('/all', authenticateToken, async (req, res) => {
       })
     );
     
-    res.json({
-      data: usersWithLeadCounts,
+    return successResponse(res, {
+      users: usersWithLeadCounts,
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
         total,
         limit: parseInt(limit)
       }
-    });
+    }, 'Users retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -266,7 +266,7 @@ router.post('/', authenticateToken, [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return errorResponse(res, 'Validation failed', 400, errors.array());
     }
 
     // Get requesting user's role and center
@@ -285,7 +285,7 @@ router.post('/', authenticateToken, [
       // Validate role is sales-related
       const targetRole = await Role.findById(userData.roleId);
       if (!targetRole || !['hod_sales', 'sales_manager', 'sales_agent'].includes(targetRole.slug)) {
-        return res.status(403).json({ error: 'Can only create sales-related users' });
+        return errorResponse(res, 'Can only create sales-related users', 403);
       }
     }
     
@@ -293,7 +293,7 @@ router.post('/', authenticateToken, [
     if (requestingUserRole === 'hod_presales' || requestingUserRole === 'manager_presales') {
       const targetRole = await Role.findById(userData.roleId);
       if (!targetRole || !['presales_agent', 'hod_presales', 'manager_presales'].includes(targetRole.slug)) {
-        return res.status(403).json({ error: 'Can only create presales-related users' });
+        return errorResponse(res, 'Can only create presales-related users', 403);
       }
     }
     
@@ -312,12 +312,12 @@ router.post('/', authenticateToken, [
       .populate('languageIds')
       .select('-password');
     
-    res.status(201).json(populatedUser);
+    return successResponse(res, populatedUser, 'User created successfully', 201);
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(400).json({ error: 'Email already exists' });
+      return errorResponse(res, 'Email already exists', 400);
     }
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -332,7 +332,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (requestingUserRole === 'hod_sales' || requestingUserRole === 'sales_manager') {
       const targetUser = await User.findById(req.params.id);
       if (!targetUser || !targetUser.centreId.equals(requestingUser.centreId)) {
-        return res.status(403).json({ error: 'Access denied: Can only update users from your center' });
+        return errorResponse(res, 'Access denied: Can only update users from your center', 403);
       }
     }
     
@@ -340,7 +340,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (requestingUserRole === 'hod_presales' || requestingUserRole === 'manager_presales') {
       const targetUser = await User.findById(req.params.id).populate('roleId');
       if (!targetUser || !['presales_agent', 'hod_presales', 'manager_presales'].includes(targetUser.roleId.slug)) {
-        return res.status(403).json({ error: 'Access denied: Can only update presales users' });
+        return errorResponse(res, 'Access denied: Can only update presales users', 403);
       }
     }
     
@@ -358,7 +358,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     
     const user = await User.findById(req.params.id);
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return errorResponse(res, 'User not found', 404);
     }
     
     Object.assign(user, updateData);
@@ -371,9 +371,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
       .populate('languageIds')
       .select('-password');
     
-    res.json(updatedUser);
+    return successResponse(res, updatedUser, 'User updated successfully', 200);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    return errorResponse(res, error.message, 400);
   }
 });
 
@@ -387,12 +387,12 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     );
     
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return errorResponse(res, 'User not found', 404);
     }
     
-    res.json({ message: 'User deleted successfully' });
+    return successResponse(res, null, 'User deleted successfully', 200);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    return errorResponse(res, error.message, 400);
   }
 });
 
@@ -400,12 +400,12 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 router.post('/:id/profile-image', authenticateToken, upload.single('profileImage'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'No image file provided' });
+      return errorResponse(res, 'No image file provided', 400);
     }
 
     const user = await User.findById(req.params.id);
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return errorResponse(res, 'User not found', 404);
     }
 
     // Delete old profile image if exists
@@ -420,12 +420,9 @@ router.post('/:id/profile-image', authenticateToken, upload.single('profileImage
     user.profileImage = req.file.filename;
     await user.save();
 
-    res.json({ 
-      message: 'Profile image uploaded successfully',
-      profileImage: req.file.filename
-    });
+    return successResponse(res, { profileImage: req.file.filename }, 'Profile image uploaded successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -437,7 +434,7 @@ router.get('/profile-image/:filename', (req, res) => {
   if (fs.existsSync(imagePath)) {
     res.sendFile(imagePath);
   } else {
-    res.status(404).json({ error: 'Image not found' });
+    return errorResponse(res, 'Image not found', 404);
   }
 });
 
@@ -469,10 +466,10 @@ router.get('/export', authenticateToken, async (req, res) => {
     }));
     
     console.log('Sending CSV data:', csvData.length, 'records');
-    res.json(csvData);
+    return successResponse(res, csvData, 'Users exported successfully', 200);
   } catch (error) {
     console.error('Users export error:', error);
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 

@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { addWatermark } = require('../utils/watermark');
+const { successResponse, errorResponse } = require('../utils/response');
 
 // Configure multer for document uploads
 const storage = multer.diskStorage({
@@ -22,7 +23,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+  limits: { fileSize: 50 * 1024 * 1024 }
 });
   
 
@@ -41,7 +42,7 @@ exports.uploadDocument = [
 
       if (!req.file) {
         console.log('5. ERROR: No file uploaded');
-        return res.status(400).json({ error: 'No file uploaded' });
+        return errorResponse(res, 'No file uploaded', 400);
       }
       console.log('5. File validated successfully');
 
@@ -131,7 +132,7 @@ exports.uploadDocument = [
 
       console.log('20. SUCCESS - Sending response');
       console.log('=== UPLOAD END ===');
-      res.status(201).json(document);
+      return successResponse(res, document, 'Document uploaded successfully', 201);
     } catch (error) {
       console.error('ERROR at step:', error.message);
       console.error('Full error:', error);
@@ -140,7 +141,7 @@ exports.uploadDocument = [
         fs.unlinkSync(req.file.path);
       }
       console.log('=== UPLOAD FAILED ===');
-      res.status(500).json({ error: error.message });
+      return errorResponse(res, error.message, 500);
     }
   }
 ];
@@ -152,26 +153,21 @@ exports.getDocuments = async (req, res) => {
     
     let query = { deletedAt: null };
     
-    // If search or keyword filters are active, search all documents
     const hasFilters = keyword || keywords;
     
     if (!hasFilters) {
-      // No filters: show only current folder documents
       if (folderId) {
         query.folderId = folderId;
       } else if (folderId === undefined) {
         query.folderId = null;
       }
     }
-    // If filters are active, search across all documents (ignore folderId)
     
-    // Search by single keyword (text search)
     if (keyword) {
       const keywordDoc = await Keyword.findOne({ name: { $regex: keyword, $options: 'i' } });
       if (keywordDoc) {
         query.keywords = keywordDoc._id;
       } else {
-        // Also search in title, subtitle, fileName
         query.$or = [
           { title: { $regex: keyword, $options: 'i' } },
           { subtitle: { $regex: keyword, $options: 'i' } },
@@ -180,7 +176,6 @@ exports.getDocuments = async (req, res) => {
       }
     }
     
-    // Filter by multiple keywords
     if (keywords) {
       const keywordArray = keywords.split(',').map(k => k.trim()).filter(k => k);
       if (keywordArray.length > 0) {
@@ -189,7 +184,7 @@ exports.getDocuments = async (req, res) => {
         if (keywordIds.length > 0) {
           query.keywords = { $in: keywordIds };
         } else {
-          return res.json([]);
+          return successResponse(res, { documents: [] }, 'No documents found');
         }
       }
     }
@@ -199,9 +194,9 @@ exports.getDocuments = async (req, res) => {
       .populate('keywords')
       .populate('folderId', 'name')
       .sort({ createdAt: -1 });
-    res.json(documents);
+    return successResponse(res, { documents }, 'Documents retrieved successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -212,11 +207,11 @@ exports.getDocument = async (req, res) => {
       .populate('uploadedBy', 'name email')
       .populate('keywords');
     if (!document) {
-      return res.status(404).json({ error: 'Document not found' });
+      return errorResponse(res, 'Document not found', 404);
     }
-    res.json(document);
+    return successResponse(res, document, 'Document retrieved successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -225,11 +220,11 @@ exports.downloadDocument = async (req, res) => {
   try {
     const document = await Document.findOne({ _id: req.params.id, deletedAt: null });
     if (!document) {
-      return res.status(404).json({ error: 'Document not found' });
+      return errorResponse(res, 'Document not found', 404);
     }
     res.download(document.filePath, document.fileName);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -238,11 +233,11 @@ exports.viewDocument = async (req, res) => {
   try {
     const document = await Document.findOne({ _id: req.params.id, deletedAt: null });
     if (!document) {
-      return res.status(404).json({ error: 'Document not found' });
+      return errorResponse(res, 'Document not found', 404);
     }
     
     if (!fs.existsSync(document.filePath)) {
-      return res.status(404).json({ error: 'File not found on server' });
+      return errorResponse(res, 'File not found on server', 404);
     }
     
     res.setHeader('Content-Type', document.fileType);
@@ -250,7 +245,7 @@ exports.viewDocument = async (req, res) => {
     res.sendFile(path.resolve(document.filePath));
   } catch (error) {
     console.error('View document error:', error);
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -259,10 +254,9 @@ exports.deleteDocument = async (req, res) => {
   try {
     const document = await Document.findById(req.params.id);
     if (!document) {
-      return res.status(404).json({ error: 'Document not found' });
+      return errorResponse(res, 'Document not found', 404);
     }
     
-    // Decrease keyword usage count
     for (const keywordId of document.keywords) {
       const keyword = await Keyword.findById(keywordId);
       if (keyword) {
@@ -273,9 +267,9 @@ exports.deleteDocument = async (req, res) => {
     
     document.deletedAt = new Date();
     await document.save();
-    res.json({ message: 'Document deleted successfully' });
+    return successResponse(res, null, 'Document deleted successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };
 
@@ -286,10 +280,9 @@ exports.updateDocument = async (req, res) => {
     const document = await Document.findById(req.params.id);
     
     if (!document) {
-      return res.status(404).json({ error: 'Document not found' });
+      return errorResponse(res, 'Document not found', 404);
     }
 
-    // Decrease old keywords usage count
     for (const keywordId of document.keywords) {
       const keyword = await Keyword.findById(keywordId);
       if (keyword) {
@@ -298,7 +291,6 @@ exports.updateDocument = async (req, res) => {
       }
     }
 
-    // Process new keywords
     let keywordIds = [];
     if (keywords && keywords.length > 0) {
       for (const keywordName of keywords) {
@@ -322,8 +314,8 @@ exports.updateDocument = async (req, res) => {
     await document.save();
     await document.populate(['uploadedBy', 'keywords', 'folderId']);
     
-    res.json(document);
+    return successResponse(res, document, 'Document updated successfully');
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 };

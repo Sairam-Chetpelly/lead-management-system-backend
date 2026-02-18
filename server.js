@@ -25,7 +25,6 @@ const metaRoutes = require('./routes/meta');
 const documentRoutes = require('./routes/documents');
 const folderRoutes = require('./routes/folders');
 const keywordRoutes = require('./routes/keywords');
-const v1Routes = require('./routes/v1');
 const { startTokenScheduler } = require('./utils/tokenScheduler');
 
 const app = express();
@@ -66,9 +65,9 @@ const userLimiter = rateLimit({
 app.use('/api/auth', publicLimiter);
 app.use('/api', userLimiter);
 
-// API Key protection for all routes except health check, document serving, webhooks, and v1 auth
+// API Key protection for all routes except health check, document serving, webhooks
 app.use('/api', (req, res, next) => {
-  if (req.path === '/health' || req.path.startsWith('/leads/document/') || req.path.startsWith('/leads/webhook/') || req.path.startsWith('/v1/auth')) {
+  if (req.path === '/health' || req.path.startsWith('/leads/document/') || req.path.startsWith('/leads/webhook/')) {
     return next();
   }
   apiKeyAuth(req, res, next);
@@ -104,8 +103,6 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/folders', folderRoutes);
 app.use('/api/keywords', keywordRoutes);
 
-// V1 API Routes
-app.use('/api/v1', v1Routes);
 
 // For Vercel deployment
 module.exports = app;
