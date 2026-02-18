@@ -1,5 +1,7 @@
 const Document = require('../models/Document');
 const Keyword = require('../models/Keyword');
+const DownloadLog = require('../models/DownloadLog');
+const User = require('../models/User');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -222,6 +224,38 @@ exports.downloadDocument = async (req, res) => {
     if (!document) {
       return errorResponse(res, 'Document not found', 404);
     }
+
+    // Check user role and download limit
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+
+    // Admin has unlimited downloads
+    if (userRole !== 'admin') {
+      // Get today's start and end timestamps
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Count today's downloads for this user
+      const todayDownloads = await DownloadLog.countDocuments({
+        userId: req.user.userId,
+        downloadDate: { $gte: startOfDay, $lte: endOfDay }
+      });
+
+      // Check if limit exceeded
+      if (todayDownloads >= 5) {
+        return errorResponse(res, 'Daily download limit reached. You can download up to 5 documents per day. Limit resets at midnight.', 400);
+      }
+
+      // Log the download
+      await DownloadLog.create({
+        userId: req.user.userId,
+        documentId: document._id,
+        downloadDate: new Date()
+      });
+    }
+
     res.download(document.filePath, document.fileName);
   } catch (error) {
     return errorResponse(res, error.message, 500);
