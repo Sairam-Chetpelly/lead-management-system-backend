@@ -1,30 +1,59 @@
 const sharp = require('sharp');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 
+const LOGO_PATH = path.join(__dirname, '../assets/logo.png');
+
 // Add watermark to image
-async function addImageWatermark(inputPath, outputPath, watermarkText = 'REMINISCENT') {
+async function addImageWatermark(inputPath, outputPath) {
   try {
     const image = sharp(inputPath);
     const metadata = await image.metadata();
     
-    const svgWatermark = Buffer.from(`
-      <svg width="${metadata.width}" height="${metadata.height}">
-        <defs>
-          <pattern id="watermark" x="0" y="0" width="400" height="400" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
-            <text x="50" y="200" font-size="40" fill="rgba(0,0,0,0.15)" font-family="Arial, sans-serif" font-weight="bold">
-              ${watermarkText}
-            </text>
-          </pattern>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#watermark)"/>
-      </svg>
-    `);
+    // Check if logo exists
+    if (fsSync.existsSync(LOGO_PATH)) {
+      // Single centered watermark with opacity
+      const logoSize = Math.min(metadata.width, metadata.height) * 0.4;
+      
+      const logo = await sharp(LOGO_PATH)
+        .resize(Math.floor(logoSize), Math.floor(logoSize), { fit: 'inside' })
+        .ensureAlpha()
+        .modulate({ brightness: 1, saturation: 1 })
+        .composite([{
+          input: Buffer.from([255, 255, 255, Math.floor(255 * 0.3)]),
+          raw: { width: 1, height: 1, channels: 4 },
+          tile: true,
+          blend: 'dest-in'
+        }])
+        .png()
+        .toBuffer();
+      
+      const logoMeta = await sharp(logo).metadata();
+      const centerX = Math.floor((metadata.width - logoMeta.width) / 2);
+      const centerY = Math.floor((metadata.height - logoMeta.height) / 2);
 
-    await image
-      .composite([{ input: svgWatermark, blend: 'over' }])
-      .toFile(outputPath);
+      await image
+        .composite([{
+          input: logo,
+          top: centerY,
+          left: centerX,
+          blend: 'over'
+        }])
+        .toFile(outputPath);
+    } else {
+      // Fallback to text watermark
+      const svgWatermark = Buffer.from(`
+        <svg width="${metadata.width}" height="${metadata.height}">
+          <text x="50%" y="50%" font-size="60" fill="rgba(0,0,0,0.2)" font-family="Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="middle">
+            REMINISCENT
+          </text>
+        </svg>
+      `);
+
+      await image.composite([{ input: svgWatermark, blend: 'over' }]).toFile(outputPath);
+    }
     
     return outputPath;
   } catch (error) {
@@ -33,31 +62,51 @@ async function addImageWatermark(inputPath, outputPath, watermarkText = 'REMINIS
 }
 
 // Add watermark to PDF
-async function addPdfWatermark(inputPath, outputPath, watermarkText = 'REMINISCENT') {
+async function addPdfWatermark(inputPath, outputPath) {
   try {
     const existingPdfBytes = await fs.readFile(inputPath);
     const pdfDoc = await PDFDocument.load(existingPdfBytes);
     const pages = pdfDoc.getPages();
-    const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    
+    // Check if logo exists
+    if (fsSync.existsSync(LOGO_PATH)) {
+      // Single centered watermark per page
+      const logoBytes = await fs.readFile(LOGO_PATH);
+      const logoImage = await pdfDoc.embedPng(logoBytes);
+      const logoScale = 0.3;
+      const logoDims = logoImage.scale(logoScale);
 
-    for (const page of pages) {
-      const { width, height } = page.getSize();
-      const fontSize = 60;
-      const textWidth = font.widthOfTextAtSize(watermarkText, fontSize);
-      
-      // Add diagonal watermarks
-      for (let y = -height; y < height * 2; y += 200) {
-        for (let x = -width; x < width * 2; x += 400) {
-          page.drawText(watermarkText, {
-            x: x,
-            y: y,
-            size: fontSize,
-            font: font,
-            color: rgb(0, 0, 0),
-            opacity: 0.1,
-            rotate: { angle: -45, type: 'degrees' }
-          });
-        }
+      for (const page of pages) {
+        const { width, height } = page.getSize();
+        const centerX = (width - logoDims.width) / 2;
+        const centerY = (height - logoDims.height) / 2;
+        
+        page.drawImage(logoImage, {
+          x: centerX,
+          y: centerY,
+          width: logoDims.width,
+          height: logoDims.height,
+          opacity: 0.15
+        });
+      }
+    } else {
+      // Fallback to text watermark
+      const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      const watermarkText = 'REMINISCENT';
+
+      for (const page of pages) {
+        const { width, height } = page.getSize();
+        const fontSize = 80;
+        const textWidth = font.widthOfTextAtSize(watermarkText, fontSize);
+        
+        page.drawText(watermarkText, {
+          x: (width - textWidth) / 2,
+          y: height / 2,
+          size: fontSize,
+          font: font,
+          color: rgb(0, 0, 0),
+          opacity: 0.15
+        });
       }
     }
 
