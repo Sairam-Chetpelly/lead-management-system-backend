@@ -225,6 +225,34 @@ router.post('/centres', authenticateToken, [
   body('name').notEmpty().withMessage('Name is required'),
   body('slug').notEmpty().withMessage('Slug is required')
 ], centreController.create);
+// Export Routes (JSON for CSV) - MUST be before :id routes
+router.get('/centres/export', authenticateToken, async (req, res) => {
+  try {
+    const centres = await Centre.find({ deletedAt: null }).sort({ createdAt: -1 });
+    
+    const csvData = await Promise.all(
+      centres.map(async (centre) => {
+        const [userCount, leadCount] = await Promise.all([
+          User.countDocuments({ centreId: centre._id, deletedAt: null }),
+          Lead.countDocuments({ centreId: centre._id, deletedAt: null })
+        ]);
+        
+        return {
+          'Name': centre.name,
+          'Slug': centre.slug,
+          'User Count': userCount,
+          'Lead Count': leadCount,
+          'Created': centre.createdAt
+        };
+      })
+    );
+    
+    return successResponse(res, csvData, 'Centres exported successfully', 200);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
 router.get('/centres/:id', authenticateToken, async (req, res) => {
   try {
     const centre = await Centre.findOne({ _id: req.params.id, deletedAt: null });
@@ -348,6 +376,35 @@ router.get('/languages', authenticateToken, async (req, res) => {
     return errorResponse(res, error.message, 500);
   }
 });
+// Export Routes (JSON for CSV) - MUST be before :id routes
+router.get('/languages/export', authenticateToken, async (req, res) => {
+  try {
+    const languages = await Language.find({ deletedAt: null }).sort({ createdAt: -1 });
+    
+    const csvData = await Promise.all(
+      languages.map(async (language) => {
+        const [userCount, leadCount] = await Promise.all([
+          User.countDocuments({ languageIds: language._id, deletedAt: null }),
+          LeadActivity.countDocuments({ languageId: language._id, deletedAt: null })
+        ]);
+        
+        return {
+          'Name': language.name,
+          'Slug': language.slug,
+          'Code': language.code,
+          'User Count': userCount,
+          'Lead Count': leadCount,
+          'Created': language.createdAt
+        };
+      })
+    );
+    
+    return successResponse(res, csvData, 'Languages exported successfully', 200);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
 router.get('/languages/:id', authenticateToken, async (req, res) => {
   try {
     const language = await Language.findOne({ _id: req.params.id, deletedAt: null });
@@ -480,61 +537,10 @@ router.delete('/statuses/:id', authenticateToken, async (req, res) => {
   }
 });
 
+
+
 // Export Routes (JSON for CSV)
 router.get('/roles/export', authenticateToken, roleController.export);
-router.get('/centres/export', authenticateToken, async (req, res) => {
-  try {
-    const centres = await Centre.find({ deletedAt: null }).sort({ createdAt: -1 });
-    
-    const csvData = await Promise.all(
-      centres.map(async (centre) => {
-        const [userCount, leadCount] = await Promise.all([
-          User.countDocuments({ centreId: centre._id, deletedAt: null }),
-          Lead.countDocuments({ centreId: centre._id, deletedAt: null })
-        ]);
-        
-        return {
-          'Name': centre.name,
-          'Slug': centre.slug,
-          'User Count': userCount,
-          'Lead Count': leadCount,
-          'Created': centre.createdAt
-        };
-      })
-    );
-    
-    return successResponse(res, csvData, 'Centres exported successfully', 200);
-  } catch (error) {
-    return errorResponse(res, error.message, 500);
-  }
-});
-router.get('/languages/export', authenticateToken, async (req, res) => {
-  try {
-    const languages = await Language.find({ deletedAt: null }).sort({ createdAt: -1 });
-    
-    const csvData = await Promise.all(
-      languages.map(async (language) => {
-        const [userCount, leadCount] = await Promise.all([
-          User.countDocuments({ languageIds: language._id, deletedAt: null }),
-          LeadActivity.countDocuments({ languageId: language._id, deletedAt: null })
-        ]);
-        
-        return {
-          'Name': language.name,
-          'Slug': language.slug,
-          'Code': language.code,
-          'User Count': userCount,
-          'Lead Count': leadCount,
-          'Created': language.createdAt
-        };
-      })
-    );
-    
-    return successResponse(res, csvData, 'Languages exported successfully', 200);
-  } catch (error) {
-    return errorResponse(res, error.message, 500);
-  }
-});
 router.get('/statuses/export', authenticateToken, statusController.export);
 
 module.exports = router;
