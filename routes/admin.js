@@ -225,6 +225,43 @@ router.post('/centres', authenticateToken, [
   body('name').notEmpty().withMessage('Name is required'),
   body('slug').notEmpty().withMessage('Slug is required')
 ], centreController.create);
+// Export Routes (CSV file download) - MUST be before :id routes
+router.get('/centres/export-csv', authenticateToken, async (req, res) => {
+  try {
+    const { search = '' } = req.query;
+    const filter = { deletedAt: null };
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const centres = await Centre.find(filter).sort({ createdAt: -1 });
+    
+    const csvRows = [];
+    csvRows.push('Name,Slug,User Count,Lead Count,Created');
+    
+    for (const centre of centres) {
+      const [userCount, leadCount] = await Promise.all([
+        User.countDocuments({ centreId: centre._id, deletedAt: null }),
+        Lead.countDocuments({ centreId: centre._id, deletedAt: null })
+      ]);
+      
+      csvRows.push(`${centre.name},${centre.slug},${userCount},${leadCount},${centre.createdAt}`);
+    }
+    
+    const csvContent = csvRows.join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=centres.csv');
+    res.send(csvContent);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
 // Export Routes (JSON for CSV) - MUST be before :id routes
 router.get('/centres/export', authenticateToken, async (req, res) => {
   try {
@@ -376,6 +413,44 @@ router.get('/languages', authenticateToken, async (req, res) => {
     return errorResponse(res, error.message, 500);
   }
 });
+// Export Routes (CSV file download) - MUST be before :id routes
+router.get('/languages/export-csv', authenticateToken, async (req, res) => {
+  try {
+    const { search = '' } = req.query;
+    const filter = { deletedAt: null };
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } },
+        { code: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const languages = await Language.find(filter).sort({ createdAt: -1 });
+    
+    const csvRows = [];
+    csvRows.push('Name,Slug,Code,User Count,Lead Count,Created');
+    
+    for (const language of languages) {
+      const [userCount, leadCount] = await Promise.all([
+        User.countDocuments({ languageIds: language._id, deletedAt: null }),
+        LeadActivity.countDocuments({ languageId: language._id, deletedAt: null })
+      ]);
+      
+      csvRows.push(`${language.name},${language.slug},${language.code},${userCount},${leadCount},${language.createdAt}`);
+    }
+    
+    const csvContent = csvRows.join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=languages.csv');
+    res.send(csvContent);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
 // Export Routes (JSON for CSV) - MUST be before :id routes
 router.get('/languages/export', authenticateToken, async (req, res) => {
   try {
@@ -540,6 +615,63 @@ router.delete('/statuses/:id', authenticateToken, async (req, res) => {
 
 
 // Export Routes (JSON for CSV)
+// Export Routes (CSV file download)
+router.get('/roles/export-csv', authenticateToken, async (req, res) => {
+  try {
+    const roles = await Role.find({ deletedAt: null }).sort({ createdAt: -1 });
+    
+    const csvRows = [];
+    csvRows.push('Name,Slug,Created');
+    
+    for (const role of roles) {
+      csvRows.push(`${role.name},${role.slug},${role.createdAt}`);
+    }
+    
+    const csvContent = csvRows.join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=roles.csv');
+    res.send(csvContent);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
+router.get('/statuses/export-csv', authenticateToken, async (req, res) => {
+  try {
+    const { search = '', type = '' } = req.query;
+    const filter = { deletedAt: null };
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (type) {
+      filter.type = type;
+    }
+    
+    const statuses = await Status.find(filter).sort({ createdAt: -1 });
+    
+    const csvRows = [];
+    csvRows.push('Name,Slug,Type,Created');
+    
+    for (const status of statuses) {
+      csvRows.push(`${status.name},${status.slug},${status.type},${status.createdAt}`);
+    }
+    
+    const csvContent = csvRows.join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=statuses.csv');
+    res.send(csvContent);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
 router.get('/roles/export', authenticateToken, roleController.export);
 router.get('/statuses/export', authenticateToken, statusController.export);
 

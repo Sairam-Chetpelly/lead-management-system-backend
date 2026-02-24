@@ -1,0 +1,529 @@
+const mongoose = require('mongoose');
+const Lead = require('../models/Lead');
+const CallLog = require('../models/CallLog');
+const Status = require('../models/Status');
+const User = require('../models/User');
+const Role = require('../models/Role');
+const Centre = require('../models/Centre');
+const LeadSource = require('../models/LeadSource');
+const { successResponse, errorResponse } = require('../utils/response');
+
+// Get dashboard data
+exports.getDashboard = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+
+    let { userType, agentId, startDate, endDate, sourceId, centreId } = req.query;
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfToday = new Date();
+    startOfToday.setHours(5, 30, 0, 0);
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    // Auto-set filters for different user roles
+    if (userRole === 'presales_agent') {
+      userType = 'presales';
+      agentId = req.user.userId;
+    } else if (userRole === 'manager_presales' || userRole === 'hod_presales') {
+      userType = 'presales';
+    } else if (userRole === 'sales_agent') {
+      userType = 'sales';
+      agentId = req.user.userId;
+    } else if (userRole === 'sales_manager' || userRole === 'hod_sales') {
+      userType = 'sales';
+    }
+
+    // Build filters
+    const leadFilter = { deletedAt: null };
+    const callFilter = { deletedAt: null };
+
+    if (userRole === 'sales_manager' && user.centreId) {
+      leadFilter.centreId = user.centreId;
+    } else if (['hod_sales', 'admin', 'marketing'].includes(userRole)) {
+      if (centreId && centreId !== 'all') {
+        leadFilter.centreId = new mongoose.Types.ObjectId(centreId);
+      }
+    }
+
+    if (!agentId || agentId === 'all') {
+      if (userType === 'sales') {
+        const salesRoleIds = await Role.find({ slug: { $in: ['sales_agent', 'sales_manager', 'hod_sales'] } }).distinct('_id');
+        if (salesRoleIds.length > 0) {
+          const salesUserQuery = { roleId: { $in: salesRoleIds }, deletedAt: null };
+          if (userRole === 'sales_manager' && user.centreId) {
+            salesUserQuery.centreId = user.centreId;
+          } else if (['hod_sales', 'admin', 'marketing'].includes(userRole) && centreId && centreId !== 'all') {
+            salesUserQuery.centreId = new mongoose.Types.ObjectId(centreId);
+          }
+          const salesUserIds = await User.find(salesUserQuery).distinct('_id');
+          if (salesUserIds.length > 0) callFilter.userId = { $in: salesUserIds };
+        }
+      } else if (userType === 'presales') {
+        const presalesRoleIds = await Role.find({ slug: { $in: ['presales_agent', 'manager_presales', 'hod_presales'] } }).distinct('_id');
+        if (presalesRoleIds.length > 0) {
+          const presalesUserQuery = { roleId: { $in: presalesRoleIds }, deletedAt: null };
+          if (['hod_sales', 'admin', 'marketing'].includes(userRole) && centreId && centreId !== 'all') {
+            presalesUserQuery.centreId = new mongoose.Types.ObjectId(centreId);
+          }
+          const presalesUserIds = await User.find(presalesUserQuery).distinct('_id');
+          if (presalesUserIds.length > 0) callFilter.userId = { $in: presalesUserIds };
+        }
+      } else {
+        if (['hod_sales', 'admin', 'marketing'].includes(userRole) && centreId && centreId !== 'all') {
+          const centerUserIds = await User.find({ centreId: new mongoose.Types.ObjectId(centreId), deletedAt: null }).distinct('_id');
+          if (centerUserIds.length > 0) callFilter.userId = { $in: centerUserIds };
+        }
+      }
+    }
+
+    if (agentId && agentId !== 'all') {
+      if (userType === 'sales') {
+        leadFilter.salesUserId = new mongoose.Types.ObjectId(agentId);
+      } else if (userType === 'presales') {
+        leadFilter.presalesUserId = new mongoose.Types.ObjectId(agentId);
+      } else {
+        leadFilter.$or = [{ salesUserId: agentId }, { presalesUserId: agentId }];
+      }
+      callFilter.userId = new mongoose.Types.ObjectId(agentId);
+    }
+
+    if (sourceId && sourceId !== 'all') {
+      leadFilter.sourceId = new mongoose.Types.ObjectId(sourceId);
+    }
+
+    const [qualifiedStatus, lostStatus, wonStatus] = await Promise.all([
+      Status.findOne({ slug: 'qualified', type: 'leadStatus' }),
+      Status.findOne({ slug: 'lost', type: 'leadStatus' }),
+      Status.findOne({ slug: 'won', type: 'leadStatus' })
+    ]);
+
+    let createdAtFilter = {};
+    if (startDate && endDate) {
+      createdAtFilter = {
+        $gte: new Date(startDate),
+        $lte: (() => {
+          const toDate = new Date(endDate);
+          toDate.setHours(23, 59, 59, 999);
+          return toDate;
+        })()
+      };
+    }
+
+    const mtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
+
+    const getLostFilter = (dateFilter = {}) => {
+      const lostFilter = { ...leadFilter, leadStatusId: lostStatus?._id, ...dateFilter };
+      if (userType === 'presales') {
+        lostFilter.qualifiedDate = null;
+      } else if (userType === 'sales') {
+        lostFilter.qualifiedDate = { $ne: null };
+      }
+      return lostFilter;
+    };
+
+    const [totalLeads, leadsMTD, leadsToday, totalQualified, qualifiedMTD, qualifiedToday, totalLost, lostMTD, lostToday, totalWon, wonMTD, wonToday] = await Promise.all([
+      Lead.countDocuments({ ...leadFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, createdAt: mtdFilter }),
+      Lead.countDocuments({ ...leadFilter, createdAt: { $gte: startOfToday, $lte: endOfToday } }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: mtdFilter }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: startOfToday, $lte: endOfToday } }),
+      Lead.countDocuments(getLostFilter(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {})),
+      Lead.countDocuments(getLostFilter({ leadLostDate: mtdFilter })),
+      Lead.countDocuments(getLostFilter({ leadLostDate: { $gte: startOfToday, $lte: endOfToday } })),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: wonStatus?._id, leadWonDate: mtdFilter }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: wonStatus?._id, leadWonDate: { $gte: startOfToday, $lte: endOfToday } })
+    ]);
+
+    const [totalCalls, callsMTD, callsToday] = await Promise.all([
+      CallLog.countDocuments({ ...callFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) }),
+      CallLog.countDocuments({ ...callFilter, createdAt: mtdFilter }),
+      CallLog.countDocuments({ ...callFilter, createdAt: { $gte: startOfToday, $lte: endOfToday } })
+    ]);
+
+    let chartStartDate, chartEndDate;
+    if (startDate && endDate) {
+      chartStartDate = new Date(startDate);
+      chartEndDate = new Date(endDate);
+    } else {
+      chartEndDate = new Date();
+      chartStartDate = new Date();
+      chartStartDate.setDate(chartStartDate.getDate() - 29);
+    }
+
+    const [leadTrends, callTrends, qualifiedTrends, lostTrends, wonTrends] = await Promise.all([
+      Lead.aggregate([
+        { $match: { ...leadFilter, createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      CallLog.aggregate([
+        { $match: { ...callFilter, createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$qualifiedDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([
+        { $match: getLostFilter({ leadLostDate: { $gte: chartStartDate, $lte: chartEndDate } }) },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadLostDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, leadStatusId: wonStatus?._id, leadWonDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$leadWonDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ])
+    ]);
+
+    const dateRange = [];
+    const currentDate = new Date(chartStartDate);
+    while (currentDate <= chartEndDate) {
+      dateRange.push(currentDate.toISOString().split('T')[0]);
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    const dailyLeads = dateRange.map(date => ({ date, count: leadTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyCalls = dateRange.map(date => ({ date, count: callTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyQualified = dateRange.map(date => ({ date, count: qualifiedTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyLost = dateRange.map(date => ({ date, count: lostTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyWon = dateRange.map(date => ({ date, count: wonTrends.find(t => t._id === date)?.count || 0 }));
+
+    const [sourceLeads, sourceQualified, sourceWon] = await Promise.all([
+      Lead.aggregate([
+        { $match: { ...leadFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) } },
+        { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, qualifiedDate: { $ne: null }, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) } },
+        { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) } },
+        { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ])
+    ]);
+
+    const [siteVisits, centerVisits, virtualMeetings] = await Promise.all([
+      Lead.countDocuments({ ...leadFilter, siteVisit: true, ...(Object.keys(createdAtFilter).length ? { siteVisitCompletedDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, centerVisit: true, ...(Object.keys(createdAtFilter).length ? { centerVisitCompletedDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, virtualMeeting: true, ...(Object.keys(createdAtFilter).length ? { virtualMeetingCompletedDate: createdAtFilter } : {}) })
+    ]);
+
+    const [siteVisitTrends, centerVisitTrends, virtualMeetingTrends] = await Promise.all([
+      Lead.aggregate([
+        { $match: { ...leadFilter, siteVisit: true, siteVisitCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$siteVisitCompletedDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, centerVisit: true, centerVisitCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$centerVisitCompletedDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, virtualMeeting: true, virtualMeetingCompletedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$virtualMeetingCompletedDate" } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ])
+    ]);
+
+    const dailySiteVisits = dateRange.map(date => ({ date, count: siteVisitTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyCenterVisits = dateRange.map(date => ({ date, count: centerVisitTrends.find(t => t._id === date)?.count || 0 }));
+    const dailyVirtualMeetings = dateRange.map(date => ({ date, count: virtualMeetingTrends.find(t => t._id === date)?.count || 0 }));
+
+    let dailyQualificationRate = [], dailyCallsPerLead = [];
+    if (userType === 'presales' || userType === 'sales') {
+      const [dailyLeadAllocations, dailyQualifications, dailyCallCounts] = await Promise.all([
+        Lead.aggregate([
+          { $match: { ...leadFilter, createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+          { $sort: { _id: 1 } }
+        ]),
+        Lead.aggregate([
+          { $match: { ...leadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$qualifiedDate" } }, count: { $sum: 1 } } },
+          { $sort: { _id: 1 } }
+        ]),
+        CallLog.aggregate([
+          { $match: { ...callFilter, createdAt: { $gte: chartStartDate, $lte: chartEndDate } } },
+          { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+          { $sort: { _id: 1 } }
+        ])
+      ]);
+
+      dailyQualificationRate = dateRange.map(date => {
+        const allocated = dailyLeadAllocations.find(t => t._id === date)?.count || 0;
+        const qualified = dailyQualifications.find(t => t._id === date)?.count || 0;
+        const rate = allocated > 0 ? ((qualified / allocated) * 100).toFixed(2) : 0;
+        return { date, rate: parseFloat(rate), allocated, qualified };
+      });
+
+      dailyCallsPerLead = dateRange.map(date => {
+        const allocated = dailyLeadAllocations.find(t => t._id === date)?.count || 0;
+        const calls = dailyCallCounts.find(t => t._id === date)?.count || 0;
+        const ratio = allocated > 0 ? (calls / allocated).toFixed(2) : 0;
+        return { date, ratio: parseFloat(ratio), calls, allocated };
+      });
+    }
+
+    let centerWonData = [], sourceCenterData = [];
+    if (['admin', 'marketing'].includes(userRole)) {
+      try {
+        centerWonData = await Lead.aggregate([
+          { $match: { ...leadFilter, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) } },
+          { $lookup: { from: 'centres', localField: 'centreId', foreignField: '_id', as: 'centre' } },
+          {
+            $addFields: {
+              centreName: { $cond: { if: { $gt: [{ $size: '$centre' }, 0] }, then: { $arrayElemAt: ['$centre.name', 0] }, else: 'Unknown' } },
+              numericProjectValue: {
+                $cond: {
+                  if: { $and: [{ $ne: ['$projectValue', null] }, { $ne: ['$projectValue', ''] }] },
+                  then: { $convert: { input: '$projectValue', to: 'double', onError: 0 } },
+                  else: 0
+                }
+              }
+            }
+          },
+          { $group: { _id: '$centreName', wonCount: { $sum: 1 }, totalValue: { $sum: '$numericProjectValue' } } },
+          { $sort: { wonCount: -1 } }
+        ]);
+
+        sourceCenterData = await Lead.aggregate([
+          { $match: { ...leadFilter, qualifiedDate: { $ne: null }, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) } },
+          { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+          { $lookup: { from: 'centres', localField: 'centreId', foreignField: '_id', as: 'centre' } },
+          {
+            $addFields: {
+              sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } },
+              centreName: { $cond: { if: { $gt: [{ $size: '$centre' }, 0] }, then: { $arrayElemAt: ['$centre.name', 0] }, else: 'Unknown' } }
+            }
+          },
+          { $group: { _id: { source: '$sourceName', centre: '$centreName' }, count: { $sum: 1 } } },
+          { $sort: { '_id.source': 1, '_id.centre': 1 } }
+        ]);
+      } catch (error) {
+        console.error('Error in aggregations:', error);
+      }
+    }
+
+    return successResponse(res, {
+      totalLeads, leadsMTD, leadsToday,
+      totalCalls, callsMTD, callsToday,
+      totalQualified, qualifiedMTD, qualifiedToday,
+      totalLost, lostMTD, lostToday,
+      totalWon, wonMTD, wonToday,
+      siteVisits, centerVisits, virtualMeetings,
+      dailyLeads, dailyCalls, dailyQualified, dailyLost, dailyWon,
+      dailySiteVisits, dailyCenterVisits, dailyVirtualMeetings,
+      sourceLeads, sourceQualified, sourceWon,
+      dailyQualificationRate, dailyCallsPerLead,
+      centerWonData, sourceCenterData,
+      role: userRole,
+      showFilters: userRole !== 'presales_agent'
+    }, 'Dashboard data retrieved successfully');
+  } catch (error) {
+    console.error('Dashboard error:', error);
+    return errorResponse(res, 'Failed to fetch dashboard data', 500);
+  }
+};
+
+// Get sources
+exports.getSources = async (req, res) => {
+  try {
+    const sources = await LeadSource.find({ deletedAt: null }).select('_id name').sort({ name: 1 });
+    return successResponse(res, sources, 'Sources retrieved successfully');
+  } catch (error) {
+    return errorResponse(res, 'Failed to fetch sources', 500);
+  }
+};
+
+// Get centres
+exports.getCentres = async (req, res) => {
+  try {
+    const centres = await Centre.find({ deletedAt: null }).select('_id name').sort({ name: 1 });
+    return successResponse(res, centres, 'Centres retrieved successfully');
+  } catch (error) {
+    return errorResponse(res, 'Failed to fetch centres', 500);
+  }
+};
+
+// Get users by type
+exports.getUsersByType = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+    const { type } = req.params;
+
+    let roleFilter = {};
+    if (type === 'sales') {
+      const salesRoles = await Role.find({ slug: { $in: ['sales_agent'] } });
+      roleFilter = { roleId: { $in: salesRoles.map(r => r._id) } };
+    } else if (type === 'presales') {
+      const presalesRoles = await Role.find({ slug: { $in: ['presales_agent'] } });
+      roleFilter = { roleId: { $in: presalesRoles.map(r => r._id) } };
+    } else {
+      const presalesRoles = await Role.find({ slug: { $in: ['presales_agent', 'sales_agent'] } });
+      roleFilter = { roleId: { $in: presalesRoles.map(r => r._id) } };
+    }
+
+    if (userRole === 'sales_manager' && user.centreId) {
+      roleFilter.centreId = user.centreId;
+    }
+
+    const users = await User.find({ ...roleFilter, deletedAt: null }).select('_id name email').sort({ name: 1 });
+    return successResponse(res, users, 'Users retrieved successfully');
+  } catch (error) {
+    return errorResponse(res, 'Failed to fetch users', 500);
+  }
+};
+
+// Export dashboard data
+exports.exportDashboard = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+    let { userType, agentId, startDate, endDate, sourceId, centreId } = req.query;
+    
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const leadFilter = { deletedAt: null };
+    
+    if (userRole === 'sales_manager' && user.centreId) {
+      leadFilter.centreId = user.centreId;
+    } else if (['hod_sales', 'admin', 'marketing'].includes(userRole)) {
+      if (centreId && centreId !== 'all') {
+        leadFilter.centreId = new mongoose.Types.ObjectId(centreId);
+      }
+    }
+    
+    const [qualifiedStatus, lostStatus, wonStatus] = await Promise.all([
+      Status.findOne({ slug: 'qualified', type: 'leadStatus' }),
+      Status.findOne({ slug: 'lost', type: 'leadStatus' }),
+      Status.findOne({ slug: 'won', type: 'leadStatus' })
+    ]);
+
+    let createdAtFilter = {};
+    if (startDate && endDate) {
+      createdAtFilter = {
+        $gte: new Date(startDate),
+        $lte: (() => { const toDate = new Date(endDate); toDate.setHours(23, 59, 59, 999); return toDate; })()
+      };
+    }
+    const mtdFilter = startDate && endDate ? createdAtFilter : { $gte: startOfMonth };
+
+    const [totalLeads, leadsMTD, totalQualified, qualifiedMTD, totalLost, lostMTD, totalWon, wonMTD, sourceLeads, sourceQualified, sourceWon, centerWonData, sourceCenterData, siteVisits, centerVisits, virtualMeetings] = await Promise.all([
+      Lead.countDocuments({ ...leadFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, createdAt: mtdFilter }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: qualifiedStatus?._id, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: qualifiedStatus?._id, qualifiedDate: mtdFilter }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: lostStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadLostDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: lostStatus?._id, leadLostDate: mtdFilter }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, leadStatusId: wonStatus?._id, leadWonDate: mtdFilter }),
+      Lead.aggregate([
+        { $match: { ...leadFilter, ...(Object.keys(createdAtFilter).length ? { createdAt: createdAtFilter } : {}) } },
+        { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, qualifiedDate: { $ne: null }, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) } },
+        { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) } },
+        { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+        { $addFields: { sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } } } },
+        { $group: { _id: '$sourceName', count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, leadStatusId: wonStatus?._id, ...(Object.keys(createdAtFilter).length ? { leadWonDate: createdAtFilter } : {}) } },
+        { $lookup: { from: 'centres', localField: 'centreId', foreignField: '_id', as: 'centre' } },
+        { $addFields: { 
+          centreName: { $cond: { if: { $gt: [{ $size: '$centre' }, 0] }, then: { $arrayElemAt: ['$centre.name', 0] }, else: 'Unknown' } },
+          numericProjectValue: { $cond: { if: { $and: [{ $ne: ['$projectValue', null] }, { $ne: ['$projectValue', ''] }] }, then: { $convert: { input: '$projectValue', to: 'double', onError: 0 } }, else: 0 } }
+        }},
+        { $group: { _id: '$centreName', wonCount: { $sum: 1 }, totalValue: { $sum: '$numericProjectValue' } } },
+        { $sort: { wonCount: -1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { ...leadFilter, qualifiedDate: { $ne: null }, ...(Object.keys(createdAtFilter).length ? { qualifiedDate: createdAtFilter } : {}) } },
+        { $lookup: { from: 'leadsources', localField: 'sourceId', foreignField: '_id', as: 'source' } },
+        { $lookup: { from: 'centres', localField: 'centreId', foreignField: '_id', as: 'centre' } },
+        { $addFields: { 
+          sourceName: { $cond: { if: { $gt: [{ $size: '$source' }, 0] }, then: { $arrayElemAt: ['$source.name', 0] }, else: 'Unknown' } },
+          centreName: { $cond: { if: { $gt: [{ $size: '$centre' }, 0] }, then: { $arrayElemAt: ['$centre.name', 0] }, else: 'Unknown' } }
+        }},
+        { $group: { _id: { source: '$sourceName', centre: '$centreName' }, count: { $sum: 1 } } },
+        { $sort: { '_id.source': 1, '_id.centre': 1 } }
+      ]),
+      Lead.countDocuments({ ...leadFilter, siteVisit: true, ...(Object.keys(createdAtFilter).length ? { siteVisitCompletedDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, centerVisit: true, ...(Object.keys(createdAtFilter).length ? { centerVisitCompletedDate: createdAtFilter } : {}) }),
+      Lead.countDocuments({ ...leadFilter, virtualMeeting: true, ...(Object.keys(createdAtFilter).length ? { virtualMeetingCompletedDate: createdAtFilter } : {}) })
+    ]);
+
+    const csvRows = [
+      ['Metric', 'Value'],
+      ['Total Leads', totalLeads],
+      ['Leads MTD', leadsMTD],
+      ['Total Qualified', totalQualified],
+      ['Qualified MTD', qualifiedMTD],
+      ['Total Lost', totalLost],
+      ['Lost MTD', lostMTD],
+      ['Total Won', totalWon],
+      ['Won MTD', wonMTD],
+      ['Site Visits', siteVisits],
+      ['Center Visits', centerVisits],
+      ['Virtual Meetings', virtualMeetings],
+      [''],
+      ['Source Wise Leads'],
+      ['Source', 'Count'],
+      ...sourceLeads.map(s => [s._id, s.count]),
+      [''],
+      ['Source Wise Qualified'],
+      ['Source', 'Count'],
+      ...sourceQualified.map(s => [s._id, s.count]),
+      [''],
+      ['Source Wise Won'],
+      ['Source', 'Count'],
+      ...sourceWon.map(s => [s._id, s.count]),
+      [''],
+      ['Center Won Leads'],
+      ['Center', 'Won Count', 'Project Value'],
+      ...centerWonData.map(c => [c._id, c.wonCount, c.totalValue]),
+      [''],
+      ['Source/Center Qualified Distribution'],
+      ['Source', 'Center', 'Count'],
+      ...sourceCenterData.map(sc => [sc._id.source, sc._id.centre, sc.count])
+    ];
+
+    const csv = csvRows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=dashboard-export.csv');
+    res.send(csv);
+  } catch (error) {
+    console.error('Export error:', error);
+    return errorResponse(res, 'Export failed', 500);
+  }
+};

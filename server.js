@@ -21,11 +21,9 @@ const dashboardRoutes = require('./routes/dashboard');
 const callLogRoutes = require('./routes/callLogs');
 const activityLogRoutes = require('./routes/activityLogs');
 const leadActivityRoutes = require('./routes/leadActivities');
-const metaRoutes = require('./routes/meta');
 const documentRoutes = require('./routes/documents');
 const folderRoutes = require('./routes/folders');
 const keywordRoutes = require('./routes/keywords');
-const { startTokenScheduler } = require('./utils/tokenScheduler');
 
 const app = express();
 
@@ -77,8 +75,6 @@ app.use('/api', (req, res, next) => {
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
     console.log('MongoDB connected');
-    // Start token scheduler after DB connection
-    // startTokenScheduler();
   })
   .catch(err => console.error('MongoDB connection error:', err));
 
@@ -98,7 +94,6 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/call-logs', callLogRoutes);
 app.use('/api/activity-logs', activityLogRoutes);
 app.use('/api/lead-activities', leadActivityRoutes);
-app.use('/api/meta', metaRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/folders', folderRoutes);
 app.use('/api/keywords', keywordRoutes);

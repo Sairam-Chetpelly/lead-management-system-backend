@@ -1,21 +1,20 @@
 const { body } = require('express-validator');
 
-const loginValidation = [
+exports.loginValidation = [
   body('email').isEmail().withMessage('Please provide a valid email'),
   body('password').notEmpty().withMessage('Password is required')
 ];
 
-const forgotPasswordValidation = [
+exports.emailValidation = [
   body('email').isEmail().withMessage('Please provide a valid email')
 ];
 
-const resetPasswordValidation = [
+exports.resetPasswordValidation = [
   body('token').notEmpty().withMessage('Token is required'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
 ];
 
-module.exports = {
-  loginValidation,
-  forgotPasswordValidation,
-  resetPasswordValidation
-};
+exports.verifyOTPValidation = [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('otp').isLength({ min: 4, max: 4 }).withMessage('OTP must be 4 digits')
+];
