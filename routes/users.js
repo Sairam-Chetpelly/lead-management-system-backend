@@ -34,6 +34,7 @@ const upload = multer({
 });
 
 router.get('/export-csv', authenticateToken, controller.exportCSV);
+router.get('/search-dropdown', authenticateToken, controller.searchDropdown);
 router.get('/all', authenticateToken, controller.getAllUnfiltered);
 router.get('/profile-image/:filename', controller.getProfileImage);
 router.get('/', authenticateToken, controller.getAll);

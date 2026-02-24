@@ -197,6 +197,63 @@ Returns CSV-formatted JSON data of all users.
 
 ---
 
+## Search Dropdown
+
+### Search Users for Dropdown
+**GET** `/api/users/search-dropdown`
+
+Returns minimal user data for dropdown/autocomplete components.
+
+**Query Parameters:**
+- `search`: Search by name (required, min 3 characters)
+- `role`: Filter by role ID or slug (optional)
+- `centre`: Filter by centre ID or slug (optional)
+
+**Success Response (200):**
+```json
+{
+  "data": [
+    {
+      "_id": "507f1f77bcf86cd799439011",
+      "name": "John Doe",
+      "email": "john@example.com",
+      "roleId": {
+        "_id": "507f1f77bcf86cd799439012",
+        "name": "Sales Agent",
+        "slug": "sales_agent"
+      },
+      "centreId": {
+        "_id": "507f1f77bcf86cd799439014",
+        "name": "Mumbai",
+        "slug": "mumbai"
+      },
+      "statusId": {
+        "_id": "507f1f77bcf86cd799439013",
+        "name": "Active",
+        "slug": "active"
+      },
+      "languageIds": [
+        {
+          "_id": "507f1f77bcf86cd799439015",
+          "name": "English",
+          "slug": "english",
+          "code": "en"
+        }
+      ]
+    }
+  ],
+  "message": "Users retrieved successfully"
+}
+```
+
+**Notes:**
+- Returns maximum 20 results
+- Results sorted alphabetically by name
+- Supports both role ID (MongoDB ObjectId) and role slug
+- Supports both centre ID (MongoDB ObjectId) and centre slug
+
+---
+
 ## Role-Based Access Control
 
 ### Admin

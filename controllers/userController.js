@@ -53,7 +53,7 @@ exports.getAll = async (req, res) => {
         .populate('statusId', 'name slug')
         .populate('centreId', 'name slug')
         .populate('languageIds', 'name slug code')
-        .select('-password')
+        .select('-password -resetPasswordToken -resetPasswordExpires -__v -deletedAt -resetPasswordOTP -resetPasswordOTPExpires')
         .skip(skip)
         .limit(parseInt(limit))
         .sort({ createdAt: -1 }),
@@ -391,6 +391,52 @@ exports.exportCSV = async (req, res) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=users.csv');
     res.send(csvRows.join('\n'));
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// Search users for dropdown (minimal data)
+exports.searchDropdown = async (req, res) => {
+  try {
+    const { search = '', role = '', centre } = req.query;
+
+    if (!search || search.length < 3) {
+      return successResponse(res, [], 'Minimum 3 characters required', 200);
+    }
+
+    const filter = {
+      deletedAt: null,
+      name: { $regex: search, $options: 'i' }
+    };
+
+    if (role) {
+      if (typeof role === 'string' && !role.match(/^[0-9a-fA-F]{24}$/)) {
+        const roleDoc = await Role.findOne({ slug: role });
+        if (roleDoc) filter.roleId = roleDoc._id;
+      } else {
+        filter.roleId = role;
+      }
+    }
+    if (centre) {
+      if (typeof centre === 'string' && !centre.match(/^[0-9a-fA-F]{24}$/)) {
+        const centreDoc = await Centre.findOne({ slug: centre });
+        if (centreDoc) filter.centreId = centreDoc._id;
+      } else {
+        filter.centreId = centre;
+      }
+    }
+
+    const users = await User.find(filter)
+      .select('_id name email')
+      .populate('roleId', 'name slug')
+      .populate('centreId', 'name slug')
+      .populate('statusId', 'name slug')
+      .populate('languageIds', 'name slug code')
+      .limit(20)
+      .sort({ name: 1 });
+
+    return successResponse(res, users, 'Users retrieved successfully', 200);
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }

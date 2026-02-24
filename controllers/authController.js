@@ -231,10 +231,10 @@ exports.resetPasswordWithToken = async (req, res) => {
     }
 
     user.password = password;
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpiry = undefined;
-    user.resetPasswordOTP = undefined;
-    user.resetPasswordOTPExpiry = undefined;
+    user.resetPasswordToken = null;
+    user.resetPasswordExpiry = null;
+    user.resetPasswordOTP = null;
+    user.resetPasswordOTPExpiry = null;
     await user.save();
 
     return successResponse(res, null, 'Password reset successfully');
