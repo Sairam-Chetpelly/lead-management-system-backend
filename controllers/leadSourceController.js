@@ -48,8 +48,9 @@ exports.exportCSV = async (req, res) => {
     }
     
     const csvContent = csvRows.join('\n');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=lead-sources.csv');
+    res.setHeader('Content-Disposition', `attachment; filename=lead-sources_${timestamp}.csv`);
     res.send(csvContent);
   } catch (error) {
     return errorResponse(res, error.message, 500);

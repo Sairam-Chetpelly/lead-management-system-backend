@@ -519,8 +519,9 @@ exports.exportDashboard = async (req, res) => {
     ];
 
     const csv = csvRows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=dashboard-export.csv');
+    res.setHeader('Content-Disposition', `attachment; filename=dashboard-export_${timestamp}.csv`);
     res.send(csv);
   } catch (error) {
     console.error('Export error:', error);

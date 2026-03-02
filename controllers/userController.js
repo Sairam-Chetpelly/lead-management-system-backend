@@ -3,6 +3,7 @@ const Role = require('../models/Role');
 const Lead = require('../models/Lead');
 const { successResponse, errorResponse } = require('../utils/response');
 const { validationResult } = require('express-validator');
+const Centre = require('../models/Centre');
 const path = require('path');
 const fs = require('fs');
 
@@ -268,11 +269,10 @@ exports.delete = async (req, res) => {
     if (!user || user.deletedAt) {
       return errorResponse(res, 'User not found', 404);
     }
-    const leadCount = await LeadActivity.countDocuments({
+    const leadCount = await Lead.countDocuments({
       $or: [
         { presalesUserId: userId },
-        { salesUserId: userId },
-        { updatedPerson: userId }
+        { salesUserId: userId }
       ],
       deletedAt: null
     });
@@ -388,8 +388,9 @@ exports.exportCSV = async (req, res) => {
       csvRows.push(`${user.name},${user.email},${user.mobileNumber},${user.designation},${role},${status},${centre},${languages},${user.qualification},${userType},${user.createdAt}`);
     }
 
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=users.csv');
+    res.setHeader('Content-Disposition', `attachment; filename=users_${timestamp}.csv`);
     res.send(csvRows.join('\n'));
   } catch (error) {
     return errorResponse(res, error.message, 500);
