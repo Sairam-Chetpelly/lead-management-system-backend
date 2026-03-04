@@ -1084,6 +1084,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
       leadValue: req.body.leadValue || lead.leadValue,
       comment: req.body.comment || lead.comment,
       cpUserName: req.body.cpUserName || lead.cpUserName,
+      outOfStation: req.body.outOfStation !== undefined ? req.body.outOfStation : lead.outOfStation,
       updatedPerson: req.user.userId,
       files: lead.files
     };
@@ -1797,25 +1798,57 @@ router.post('/webhook/meta-ads', async (req, res) => {
               let campaignName = '';
               
               try {
-                // Fetch ad details including name and adset
+                // Fetch lead details and platform from Graph API in one call
+                let graphResponse;
+                try {
+                  graphResponse = await axios.get(
+                    `https://graph.facebook.com/v20.0/${leadgen_id}`,
+                    {
+                      params: {
+                        access_token: await getCurrentToken(),
+                        fields: 'field_data,platform,ad_id'
+                      }
+                    }
+                  );
+                } catch (tokenError) {
+                  if (tokenError.response?.status === 401) {
+                    console.log('Token expired, refreshing...');
+                    await refreshMetaToken();
+                    graphResponse = await axios.get(
+                      `https://graph.facebook.com/v20.0/${leadgen_id}`,
+                      {
+                        params: {
+                          access_token: await getCurrentToken(),
+                          fields: 'field_data,platform,ad_id'
+                        }
+                      }
+                    );
+                  } else {
+                    throw tokenError;
+                  }
+                }
+                
+                // Get platform from response
+                if (graphResponse.data.platform) {
+                  const platformValue = graphResponse.data.platform.toLowerCase();
+                  platform = platformValue === 'fb' ? 'facebook' : platformValue === 'ig' ? 'instagram' : platformValue;
+                  console.log('Platform identified:', platform);
+                }
+                
+                // Fetch ad details for campaign info
                 const adResponse = await axios.get(
                   `https://graph.facebook.com/v23.0/${ad_id}`,
                   {
                     params: {
                       access_token: await getCurrentToken(),
-                      fields: 'name,adset{name},campaign{name},creative{object_story_spec}'
+                      fields: 'name,adset{name},campaign{name}'
                     }
                   }
                 );
                 
-                // Extract ad name and adset name
                 adname = adResponse.data.name || '';
                 adsetName = adResponse.data.adset?.name || '';
                 campaignName = adResponse.data?.campaign?.name || '';
-                
-                if (adResponse.data.creative?.object_story_spec?.instagram_user_id) {
-                  platform = 'instagram';
-                }
               } catch (adError) {
                 console.log('Could not fetch ad details, defaulting to facebook:', adError.message);
               }
@@ -1825,11 +1858,11 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 let graphResponse;
                 try {
                   graphResponse = await axios.get(
-                    `https://graph.facebook.com/v23.0/${leadgen_id}`,
+                    `https://graph.facebook.com/v20.0/${leadgen_id}`,
                     {
                       params: {
                         access_token: await getCurrentToken(),
-                        fields: 'field_data'
+                        fields: 'field_data,platform'
                       }
                     }
                   );
@@ -1838,11 +1871,11 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     console.log('Token expired, refreshing...');
                     await refreshMetaToken();
                     graphResponse = await axios.get(
-                      `https://graph.facebook.com/v23.0/${leadgen_id}`,
+                      `https://graph.facebook.com/v20.0/${leadgen_id}`,
                       {
                         params: {
                           access_token: await getCurrentToken(),
-                          fields: 'field_data'
+                          fields: 'field_data,platform'
                         }
                       }
                     );
