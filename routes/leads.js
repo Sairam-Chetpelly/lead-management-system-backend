@@ -212,7 +212,7 @@ router.get('/unsigned', authenticateToken, async (req, res) => {
 router.get('/ad-values/:field', authenticateToken, async (req, res) => {
   try {
     const { field } = req.params;
-    
+
     if (!['adname', 'adset', 'campaign'].includes(field)) {
       return res.status(400).json({ error: 'Invalid field' });
     }
@@ -1041,10 +1041,12 @@ router.get('/', authenticateToken, async (req, res) => {
 
     if (req.query.assignedTo) {
       filter.$and = [
-        { $or: [
-          { presalesUserId: req.query.assignedTo },
-          { salesUserId: req.query.assignedTo }
-        ] }
+        {
+          $or: [
+            { presalesUserId: req.query.assignedTo },
+            { salesUserId: req.query.assignedTo }
+          ]
+        }
       ];
     }
 
@@ -1155,12 +1157,12 @@ router.get('/', authenticateToken, async (req, res) => {
         }
 
         console.log('Using date field for filtering:', dateField, 'From:', dateFrom, 'To:', dateTo);
-        
+
         // Build date filter condition
         const dateCondition = {};
         if (dateFrom) dateCondition.$gte = dateFrom;
         if (dateTo) dateCondition.$lte = dateTo;
-        
+
         if (Object.keys(dateCondition).length > 0) {
           filter[dateField] = dateCondition;
         }
@@ -1198,7 +1200,7 @@ router.get('/', authenticateToken, async (req, res) => {
           CallLog.countDocuments({ leadId: lead._id, deletedAt: null }),
           ActivityLog.countDocuments({ leadId: lead._id, deletedAt: null })
         ]);
-        
+
         // Check if sales agent has made any activity when assigned to sales
         let salesActivity = false;
         if (lead.salesUserId) {
@@ -1209,7 +1211,7 @@ router.get('/', authenticateToken, async (req, res) => {
           ]);
           salesActivity = salesCallLogs > 0 || salesActivityLogs > 0 || salesLeadActivities > 0;
         }
-        
+
         return {
           ...lead.toObject(),
           callLogCount,
@@ -1277,15 +1279,15 @@ router.get('/export', authenticateToken, async (req, res) => {
         filter.leadStatusId = qualifiedStatus._id;
       }
     }
-    
+
     // Apply search filters
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, 'i');
       filter.$or = [
-          { name: searchRegex },
-          { leadID: searchRegex },
-          { email: searchRegex },
-          { contactNumber: searchRegex }
+        { name: searchRegex },
+        { leadID: searchRegex },
+        { email: searchRegex },
+        { contactNumber: searchRegex }
       ];
     }
 
@@ -1294,10 +1296,12 @@ router.get('/export', authenticateToken, async (req, res) => {
     if (req.query.centre) filter.centreId = req.query.centre;
     if (req.query.assignedTo) {
       filter.$and = [
-        { $or: [
-          { presalesUserId: req.query.assignedTo },
-          { salesUserId: req.query.assignedTo }
-        ] }
+        {
+          $or: [
+            { presalesUserId: req.query.assignedTo },
+            { salesUserId: req.query.assignedTo }
+          ]
+        }
       ];
     }
     if (req.query.leadStatus) filter.leadStatusId = req.query.leadStatus;
@@ -1378,7 +1382,7 @@ router.get('/export', authenticateToken, async (req, res) => {
         const dateCondition = {};
         if (dateFrom) dateCondition.$gte = dateFrom;
         if (dateTo) dateCondition.$lte = dateTo;
-        
+
         if (Object.keys(dateCondition).length > 0) {
           filter[dateField] = dateCondition;
         }
@@ -1749,6 +1753,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
       leadValue: req.body.leadValue || lead.leadValue,
       comment: req.body.comment || lead.comment,
       cpUserName: req.body.cpUserName || lead.cpUserName,
+      outOfStation: req.body.outOfStation !== undefined ? req.body.outOfStation : lead.outOfStation,
       updatedPerson: req.user.userId,
       files: lead.files
     };
@@ -1852,7 +1857,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
     const statusChangedToQualified = req.body.leadStatusId && req.body.leadStatusId !== originalLeadStatusId;
     const salesAgentChanged = updatedData.salesUserId && updatedData.salesUserId?.toString() !== originalSalesUserId;
     const currentStatus = await Status.findById(lead.leadStatusId);
-    
+
     if (lead.salesUserId && currentStatus?.slug === 'qualified') {
       if (statusChangedToQualified || salesAgentChanged) {
         await sendLeadAssignmentNotification(lead.salesUserId, lead);
@@ -2031,7 +2036,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
     const statusChangedToQualified = req.body.leadStatusId && req.body.leadStatusId !== originalLeadStatusId;
     const salesAgentChanged = req.body.salesUserId && req.body.salesUserId !== originalSalesUserId;
     const currentStatus = await Status.findById(lead.leadStatusId);
-    
+
     if (lead.salesUserId && currentStatus?.slug === 'qualified') {
       if (statusChangedToQualified || salesAgentChanged) {
         await sendLeadAssignmentNotification(lead.salesUserId, lead);
@@ -2177,7 +2182,7 @@ router.post('/:id/assign', authenticateToken, async (req, res) => {
 
     // Store original sales agent before update
     const originalSalesUserId = lead.salesUserId?.toString();
-    
+
     // Send WhatsApp notification only if newly assigned to sales agent
     if (salesUserId && lead.salesUserId && salesUserId !== originalSalesUserId) {
       await sendLeadAssignmentNotification(lead.salesUserId, lead);
@@ -2369,7 +2374,7 @@ router.post('/webhook/google-ads', async (req, res) => {
 
     // Prepare comment with ignored fields
     let comment = `Google Ads Lead - Campaign ID: ${req.body.campaign_id || 'N/A'}, Ad Group ID: ${req.body.adgroup_id || 'N/A'}, Form ID: ${req.body.form_id || 'N/A'}`;
-    
+
     if (ignoredFields.length > 0) {
       comment += ` | Additional Fields: ${ignoredFields.join(', ')}`;
     }
@@ -2460,7 +2465,7 @@ router.get('/webhook/meta-ads', (req, res) => {
 router.post('/webhook/meta-ads', async (req, res) => {
   try {
     console.log('Meta Ads webhook received:', JSON.stringify(req.body));
-    
+
     if (req.body.entry) {
       for (let entry of req.body.entry) {
         if (entry.changes) {
@@ -2482,27 +2487,60 @@ router.post('/webhook/meta-ads', async (req, res) => {
               let adname = '';
               let adsetName = '';
               let campaignName = '';
-              
+
               try {
-                // Fetch ad details including name and adset
+                // Fetch lead details and platform from Graph API in one call
+                let graphResponse;
+                try {
+                  graphResponse = await axios.get(
+                    `https://graph.facebook.com/v20.0/${leadgen_id}`,
+                    {
+                      params: {
+                        access_token: await getCurrentToken(),
+                        fields: 'field_data,platform,ad_id'
+                      }
+                    }
+                  );
+                } catch (tokenError) {
+                  if (tokenError.response?.status === 401) {
+                    console.log('Token expired, refreshing...');
+                    await refreshMetaToken();
+                    graphResponse = await axios.get(
+                      `https://graph.facebook.com/v20.0/${leadgen_id}`,
+                      {
+                        params: {
+                          access_token: await getCurrentToken(),
+                          fields: 'field_data,platform,ad_id'
+                        }
+                      }
+                    );
+                  } else {
+                    throw tokenError;
+                  }
+                }
+
+                // Get platform from response
+                if (graphResponse.data.platform) {
+                  const platformValue = graphResponse.data.platform.toLowerCase();
+                  platform = platformValue === 'fb' ? 'facebook' : platformValue === 'ig' ? 'instagram' : platformValue;
+                  console.log('Platform identified:', platform);
+                }
+
+                // Fetch ad details for campaign info
                 const adResponse = await axios.get(
                   `https://graph.facebook.com/v23.0/${ad_id}`,
                   {
                     params: {
                       access_token: await getCurrentToken(),
-                      fields: 'name,adset{name},campaign{name},creative{object_story_spec}'
+                      fields: 'name,adset{name},campaign{name}'
                     }
                   }
                 );
-                
-                // Extract ad name and adset name
+
                 adname = adResponse.data.name || '';
                 adsetName = adResponse.data.adset?.name || '';
                 campaignName = adResponse.data?.campaign?.name || '';
-                
-                if (adResponse.data.creative?.object_story_spec?.instagram_user_id) {
-                  platform = 'instagram';
-                }
+
               } catch (adError) {
                 console.log('Could not fetch ad details, defaulting to facebook:', adError.message);
               }
@@ -2512,11 +2550,11 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 let graphResponse;
                 try {
                   graphResponse = await axios.get(
-                    `https://graph.facebook.com/v23.0/${leadgen_id}`,
+                    `https://graph.facebook.com/v20.0/${leadgen_id}`,
                     {
                       params: {
                         access_token: await getCurrentToken(),
-                        fields: 'field_data'
+                        fields: 'field_data,platform'
                       }
                     }
                   );
@@ -2525,11 +2563,11 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     console.log('Token expired, refreshing...');
                     await refreshMetaToken();
                     graphResponse = await axios.get(
-                      `https://graph.facebook.com/v23.0/${leadgen_id}`,
+                      `https://graph.facebook.com/v20.0/${leadgen_id}`,
                       {
                         params: {
                           access_token: await getCurrentToken(),
-                          fields: 'field_data'
+                          fields: 'field_data,platform'
                         }
                       }
                     );
@@ -2546,7 +2584,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 fieldData.forEach(field => {
                   const fieldName = field.name?.toLowerCase();
                   const value = field.values?.[0] || '';
-                  
+
                   if (fieldName?.includes('name') || fieldName?.includes('full_name')) {
                     name = value;
                   } else if (fieldName?.includes('email')) {
@@ -2571,7 +2609,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
                 // Check if campaign is Channel Partners
                 const isChannelPartners = campaignName && campaignName.toLowerCase().includes('channel');
-                
+
                 // Get or create lead source based on campaign
                 let leadSource;
                 if (isChannelPartners) {
@@ -2613,7 +2651,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
                 // Prepare comment with platform and ignored fields
                 let comment = `${platform === 'instagram' ? 'Instagram' : 'Facebook'} Ads Lead - Lead ID: ${leadgen_id}, Form: ${form_id}, Ad: ${ad_id}, AdGroup: ${adgroup_id}, Page: ${page_id}`;
-                
+
                 if (extraFields.length > 0) {
                   comment += ` | Additional Fields: ${extraFields.join(', ')}`;
                 }
@@ -2643,17 +2681,17 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
                 // Create lead
                 try {
-                const lead = new Lead(leadData);
-                await lead.save();
-                console.log('Lead created:', lead);
+                  const lead = new Lead(leadData);
+                  await lead.save();
+                  console.log('Lead created:', lead);
                   // Create initial lead activity snapshot
-                const leadActivity = new LeadActivity({
-                  leadId: lead._id,
-                  ...leadData
-                });
-                await leadActivity.save();
+                  const leadActivity = new LeadActivity({
+                    leadId: lead._id,
+                    ...leadData
+                  });
+                  await leadActivity.save();
 
-                console.log('Meta lead created:', lead.leadID);
+                  console.log('Meta lead created:', lead.leadID);
                 } catch (leadError) {
                   console.error('Error creating lead:', leadError);
                   await sendMetaErrorEmail(
@@ -2671,7 +2709,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 }
               } catch (graphError) {
                 console.error('Error fetching lead from Graph API:', graphError.response?.data || graphError.message);
-                
+
                 // Send error notification email for Meta lead creation failure
                 await sendMetaErrorEmail(
                   `${platform === 'instagram' ? 'Instagram' : 'Facebook'} Lead Creation Failed`,
@@ -2696,7 +2734,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
   } catch (error) {
     console.error('Meta Ads webhook error:', error);
-    
+
     // Send error notification email for general Meta webhook errors
     sendMetaErrorEmail(
       'Meta Ads Webhook Error',
@@ -2707,7 +2745,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
         stack: error.stack
       }
     );
-    
+
     res.status(200).json({});
   }
 });
@@ -2718,16 +2756,16 @@ router.post('/test/refresh-token', async (req, res) => {
     console.log('Manual token refresh triggered via API');
     await refreshMetaToken();
     const currentToken = await getCurrentToken();
-    res.json({ 
+    res.json({
       message: 'Token refresh completed successfully',
       tokenExists: !!currentToken,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Manual token refresh failed:', error);
-    res.status(500).json({ 
-      error: 'Token refresh failed', 
-      details: error.message 
+    res.status(500).json({
+      error: 'Token refresh failed',
+      details: error.message
     });
   }
 });
