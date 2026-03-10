@@ -70,7 +70,7 @@ const leadSchema = new mongoose.Schema({
     required: false
   },
   projectValue: {
-    type: String,
+    type: Number,
     required: false
   },
   apartmentName: {
