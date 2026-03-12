@@ -15,7 +15,8 @@ exports.login = async (req, res) => {
     
     const user = await User.findOne({ email, deletedAt: null })
       .populate('roleId')
-      .populate('statusId');
+      .populate('statusId')
+      .populate('centreId');
     
     if (!user || !(await user.comparePassword(password))) {
       return errorResponse(res, 'Invalid credentials', 401);
@@ -37,8 +38,18 @@ exports.login = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        mobileNumber: user.mobileNumber,
+        designation: user.designation,
+        qualification: user.qualification,
+        userType: user.userType,
+        profileImage: user.profileImage,
         role: user.roleId.slug,
-        status: user.statusId.slug
+        status: user.statusId.slug,
+        centre: user.centreId ? {
+          id: user.centreId._id,
+          name: user.centreId.name,
+          slug: user.centreId.slug
+        } : null
       }
     }, 'Login successful');
   } catch (error) {
@@ -58,7 +69,8 @@ exports.checkStatus = async (req, res) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.userId)
       .populate('statusId')
-      .populate('roleId');
+      .populate('roleId')
+      .populate('centreId');
 
     if (!user || user.deletedAt) {
       return errorResponse(res, 'User not found', 401);
@@ -77,8 +89,18 @@ exports.checkStatus = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        mobileNumber: user.mobileNumber,
+        designation: user.designation,
+        qualification: user.qualification,
+        userType: user.userType,
+        profileImage: user.profileImage,
         role: user.roleId?.slug || 'unknown',
-        status: user.statusId.slug
+        status: user.statusId.slug,
+        centre: user.centreId ? {
+          id: user.centreId._id,
+          name: user.centreId.name,
+          slug: user.centreId.slug
+        } : null
       }
     }, 'Status retrieved successfully');
   } catch (error) {
