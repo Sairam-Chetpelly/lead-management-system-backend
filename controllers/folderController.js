@@ -37,6 +37,19 @@ exports.getFolders = async (req, res) => {
   }
 };
 
+// Get all folders (for tree view)
+exports.getAllFolders = async (req, res) => {
+  try {
+    const folders = await Folder.find({ deletedAt: null })
+      .populate('createdBy', 'name email')
+      .populate('parentFolderId', 'name')
+      .sort({ createdAt: -1 });
+    return successResponse(res, { folders }, 'All folders retrieved successfully');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
 // Get folder with contents
 exports.getFolderContents = async (req, res) => {
   try {

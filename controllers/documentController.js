@@ -151,11 +151,11 @@ exports.uploadDocument = [
 // Get documents by folder or root
 exports.getDocuments = async (req, res) => {
   try {
-    const { folderId, keyword, keywords } = req.query;
+    const { folderId, keyword, keywords, categories, startDate, endDate } = req.query;
     
     let query = { deletedAt: null };
     
-    const hasFilters = keyword || keywords;
+    const hasFilters = keyword || keywords || categories || startDate || endDate;
     
     if (!hasFilters) {
       if (folderId) {
@@ -173,7 +173,8 @@ exports.getDocuments = async (req, res) => {
         query.$or = [
           { title: { $regex: keyword, $options: 'i' } },
           { subtitle: { $regex: keyword, $options: 'i' } },
-          { fileName: { $regex: keyword, $options: 'i' } }
+          { fileName: { $regex: keyword, $options: 'i' } },
+          { category: { $regex: keyword, $options: 'i' } }
         ];
       }
     }
@@ -188,6 +189,25 @@ exports.getDocuments = async (req, res) => {
         } else {
           return successResponse(res, { documents: [] }, 'No documents found');
         }
+      }
+    }
+    
+    if (categories) {
+      const categoryArray = categories.split(',').map(c => c.trim()).filter(c => c);
+      if (categoryArray.length > 0) {
+        query.category = { $in: categoryArray.map(c => new RegExp(`^${c}$`, 'i')) };
+      }
+    }
+    
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) {
+        query.createdAt.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
       }
     }
     

@@ -35,8 +35,7 @@ const documentSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ['identity', 'financial', 'property', 'agreement', 'other'],
-    default: 'other'
+    default: 'Other'
   },
   description: {
     type: String

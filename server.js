@@ -24,6 +24,7 @@ const leadActivityRoutes = require('./routes/leadActivities');
 const documentRoutes = require('./routes/documents');
 const folderRoutes = require('./routes/folders');
 const keywordRoutes = require('./routes/keywords');
+const categoryRoutes = require('./routes/categories');
 
 const app = express();
 
@@ -97,6 +98,7 @@ app.use('/api/lead-activities', leadActivityRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/folders', folderRoutes);
 app.use('/api/keywords', keywordRoutes);
+app.use('/api/categories', categoryRoutes);
 
 
 // For Vercel deployment
