@@ -64,6 +64,7 @@ exports.exportCSV = async (req, res) => {
     if (req.query.siteVisit) filter.siteVisit = req.query.siteVisit === 'true';
     if (req.query.centerVisit) filter.centerVisit = req.query.centerVisit === 'true';
     if (req.query.virtualMeeting) filter.virtualMeeting = req.query.virtualMeeting === 'true';
+    if (req.query.leadClosure) filter.leadClosure = req.query.leadClosure === 'true';
     if (req.query.outOfStation) filter.outOfStation = req.query.outOfStation === 'true';
     if (req.query.requirementWithinTwoMonths) filter.requirementWithinTwoMonths = req.query.requirementWithinTwoMonths === 'true';
     if (req.query.adname) filter.adname = new RegExp(req.query.adname, 'i');
@@ -74,7 +75,7 @@ exports.exportCSV = async (req, res) => {
     if (req.query.dateFrom || req.query.dateTo) {
       const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom + 'T00:00:00.000Z') : null;
       const dateTo = req.query.dateTo ? new Date(req.query.dateTo + 'T23:59:59.999Z') : null;
-      const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true';
+      const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true' || req.query.leadClosure === 'true';
 
       if (hasActivityFilters) {
         const activityDateConditions = [];
@@ -100,6 +101,14 @@ exports.exportCSV = async (req, res) => {
           if (dateTo) virtualMeetingCondition.$lte = dateTo;
           if (Object.keys(virtualMeetingCondition).length > 0) {
             activityDateConditions.push({ virtualMeetingDate: virtualMeetingCondition });
+          }
+        }
+        if (req.query.leadClosure === 'true') {
+          const leadClosureCondition = {};
+          if (dateFrom) leadClosureCondition.$gte = dateFrom;
+          if (dateTo) leadClosureCondition.$lte = dateTo;
+          if (Object.keys(leadClosureCondition).length > 0) {
+            activityDateConditions.push({ leadClosureDate: leadClosureCondition });
           }
         }
         if (activityDateConditions.length > 0) {
@@ -264,6 +273,7 @@ exports.getAllLeads = async (req, res) => {
     if (req.query.siteVisit) filter.siteVisit = req.query.siteVisit === 'true';
     if (req.query.centerVisit) filter.centerVisit = req.query.centerVisit === 'true';
     if (req.query.virtualMeeting) filter.virtualMeeting = req.query.virtualMeeting === 'true';
+    if (req.query.leadClosure) filter.leadClosure = req.query.leadClosure === 'true';
     if (req.query.outOfStation) filter.outOfStation = req.query.outOfStation === 'true';
     if (req.query.requirementWithinTwoMonths) filter.requirementWithinTwoMonths = req.query.requirementWithinTwoMonths === 'true';
     if (req.query.adname) filter.adname = new RegExp(req.query.adname, 'i');
@@ -274,7 +284,7 @@ exports.getAllLeads = async (req, res) => {
     if (req.query.dateFrom || req.query.dateTo) {
       const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom + 'T00:00:00.000Z') : null;
       const dateTo = req.query.dateTo ? new Date(req.query.dateTo + 'T23:59:59.999Z') : null;
-      const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true';
+      const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true' || req.query.leadClosure === 'true';
 
       if (hasActivityFilters) {
         const activityDateConditions = [];
@@ -295,6 +305,12 @@ exports.getAllLeads = async (req, res) => {
           if (dateFrom) virtualMeetingCondition.$gte = dateFrom;
           if (dateTo) virtualMeetingCondition.$lte = dateTo;
           if (Object.keys(virtualMeetingCondition).length > 0) activityDateConditions.push({ virtualMeetingDate: virtualMeetingCondition });
+        }
+        if (req.query.leadClosure === 'true') {
+          const leadClosureCondition = {};
+          if (dateFrom) leadClosureCondition.$gte = dateFrom;
+          if (dateTo) leadClosureCondition.$lte = dateTo;
+          if (Object.keys(leadClosureCondition).length > 0) activityDateConditions.push({ leadClosureDate: leadClosureCondition });
         }
         if (activityDateConditions.length > 0) {
           filter.$or = filter.$or ? [...filter.$or, ...activityDateConditions] : activityDateConditions;
