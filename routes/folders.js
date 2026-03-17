@@ -8,6 +8,8 @@ router.use(authenticateToken);
 router.post('/', folderController.createFolder);
 router.get('/all', folderController.getAllFolders);
 router.get('/', folderController.getFolders);
+router.post('/multi-download', folderController.multiDownload);
+router.get('/:id/download', folderController.downloadFolder);
 router.get('/:id', folderController.getFolderContents);
 router.put('/:id', folderController.updateFolder);
 router.delete('/:id', folderController.deleteFolder);

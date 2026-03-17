@@ -15,6 +15,10 @@ const folderSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  restricted: {
+    type: Boolean,
+    default: false
+  },
   deletedAt: {
     type: Date,
     default: null
