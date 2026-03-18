@@ -9,6 +9,7 @@ process.env.TZ = 'Asia/Kolkata';
 
 // Import middleware
 const apiKeyAuth = require('./middleware/apiKeyAuth');
+const CronService = require('./services/cronService');
 
 // Import routes at top
 const authRoutes = require('./routes/auth');
@@ -76,6 +77,8 @@ app.use('/api', (req, res, next) => {
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
     console.log('MongoDB connected');
+    // Start cron jobs after database connection
+    CronService.startCronJobs();
   })
   .catch(err => console.error('MongoDB connection error:', err));
 
