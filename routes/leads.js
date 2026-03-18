@@ -987,6 +987,9 @@ router.get('/:id', authenticateToken, leadController.getLeadById);
 // Create call log
 router.post('/:id/call', authenticateToken, leadController.createCallLog);
 
+// Download recording for call log
+router.get('/call/:id/recording', authenticateToken, leadController.downloadRecording);
+
 // Create activity log
 router.post('/:id/activity', authenticateToken, documentUpload.single('document'), async (req, res) => {
   try {
