@@ -26,7 +26,7 @@ const upload = multer({
   storage,
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit for recordings
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /\.(mp3|wav|m4a|aac|ogg|webm|mp4)$/i;
+    const allowedTypes = /\.(mp3/amr|wav|m4a|aac|ogg|webm|mp4)$/i;
     if (allowedTypes.test(file.originalname)) {
       cb(null, true);
     } else {
