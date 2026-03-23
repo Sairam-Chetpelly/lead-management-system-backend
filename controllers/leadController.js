@@ -467,6 +467,7 @@ exports.createCallLog = [
   async (req, res) => {
     try {
       let actualLeadId = null;
+      console.log('recording body file print:', req.file);
 
       try {
         const leadActivity = await LeadActivity.findById(req.params.id);
