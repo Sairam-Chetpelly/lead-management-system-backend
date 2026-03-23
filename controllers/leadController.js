@@ -469,17 +469,28 @@ exports.createCallLog = [
       let actualLeadId = null;
       console.log('recording body file print:', req.file);
 
+      // Validate ObjectId format first
+      if (!req.params.id || !req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+        if (req.file && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+        return errorResponse(res, 'Invalid lead ID format', 400);
+      }
+
       try {
+        // First try to find as LeadActivity
         const leadActivity = await LeadActivity.findById(req.params.id);
         if (leadActivity) {
           actualLeadId = leadActivity.leadId;
-        }
-        const lead = await Lead.findById(req.params.id);
-        if (lead) {
-          actualLeadId = lead._id;
+        } else {
+          // If not found as LeadActivity, try as Lead
+          const lead = await Lead.findById(req.params.id);
+          if (lead) {
+            actualLeadId = lead._id;
+          }
         }
       } catch (err) {
-        // Ignore error
+        console.error('Error finding lead:', err);
       }
 
       if (!actualLeadId) {
