@@ -213,7 +213,7 @@ router.get('/unsigned', authenticateToken, async (req, res) => {
 router.get('/ad-values/:field', authenticateToken, async (req, res) => {
   try {
     const { field } = req.params;
-    
+
     if (!['adname', 'adset', 'campaign'].includes(field)) {
       return res.status(400).json({ error: 'Invalid field' });
     }
@@ -1191,7 +1191,7 @@ router.post('/:id/presales-activity', authenticateToken, documentUpload.array('f
     const statusChangedToQualified = req.body.leadStatusId && req.body.leadStatusId !== originalLeadStatusId;
     const salesAgentChanged = updatedData.salesUserId && updatedData.salesUserId?.toString() !== originalSalesUserId;
     const currentStatus = await Status.findById(lead.leadStatusId);
-    
+
     if (lead.salesUserId && currentStatus?.slug === 'qualified') {
       if (statusChangedToQualified || salesAgentChanged) {
         await sendLeadAssignmentNotification(lead.salesUserId, lead);
@@ -1370,7 +1370,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
     const statusChangedToQualified = req.body.leadStatusId && req.body.leadStatusId !== originalLeadStatusId;
     const salesAgentChanged = req.body.salesUserId && req.body.salesUserId !== originalSalesUserId;
     const currentStatus = await Status.findById(lead.leadStatusId);
-    
+
     if (lead.salesUserId && currentStatus?.slug === 'qualified') {
       if (statusChangedToQualified || salesAgentChanged) {
         await sendLeadAssignmentNotification(lead.salesUserId, lead);
@@ -1494,7 +1494,7 @@ router.post('/:id/assign', authenticateToken, async (req, res) => {
 
     // Store original sales agent before update
     const originalSalesUserId = lead.salesUserId?.toString();
-    
+
     // Send WhatsApp notification only if newly assigned to sales agent
     if (salesUserId && lead.salesUserId && salesUserId !== originalSalesUserId) {
       await sendLeadAssignmentNotification(lead.salesUserId, lead);
@@ -1686,7 +1686,7 @@ router.post('/webhook/google-ads', async (req, res) => {
 
     // Prepare comment with ignored fields
     let comment = `Google Ads Lead - Campaign ID: ${req.body.campaign_id || 'N/A'}, Ad Group ID: ${req.body.adgroup_id || 'N/A'}, Form ID: ${req.body.form_id || 'N/A'}`;
-    
+
     if (ignoredFields.length > 0) {
       comment += ` | Additional Fields: ${ignoredFields.join(', ')}`;
     }
@@ -1777,7 +1777,7 @@ router.get('/webhook/meta-ads', (req, res) => {
 router.post('/webhook/meta-ads', async (req, res) => {
   try {
     console.log('Meta Ads webhook received:', JSON.stringify(req.body));
-    
+
     if (req.body.entry) {
       for (let entry of req.body.entry) {
         if (entry.changes) {
@@ -1799,7 +1799,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
               let adname = '';
               let adsetName = '';
               let campaignName = '';
-              
+
               try {
                 // Fetch lead details and platform from Graph API in one call
                 let graphResponse;
@@ -1895,7 +1895,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 fieldData.forEach(field => {
                   const fieldName = field.name?.toLowerCase();
                   const value = field.values?.[0] || '';
-                  
+
                   if (fieldName?.includes('name') || fieldName?.includes('full_name')) {
                     name = value;
                   } else if (fieldName?.includes('email')) {
@@ -1922,7 +1922,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
                 // Check if campaign is Channel Partners
                 const isChannelPartners = campaignName && campaignName.toLowerCase().includes('channel');
-                
+
                 // Get or create lead source based on campaign
                 let leadSource;
                 if (isChannelPartners) {
@@ -1964,7 +1964,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
                 // Prepare comment with platform and ignored fields
                 let comment = `${platform === 'instagram' ? 'Instagram' : 'Facebook'} Ads Lead - Lead ID: ${leadgen_id}, Form: ${form_id}, Ad: ${ad_id}, AdGroup: ${adgroup_id}, Page: ${page_id}`;
-                
+
                 if (extraFields.length > 0) {
                   comment += ` | Additional Fields: ${extraFields.join(', ')}`;
                 }
@@ -1997,17 +1997,17 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
                 // Create lead
                 try {
-                const lead = new Lead(leadData);
-                await lead.save();
-                console.log('Lead created:', lead);
+                  const lead = new Lead(leadData);
+                  await lead.save();
+                  console.log('Lead created:', lead);
                   // Create initial lead activity snapshot
-                const leadActivity = new LeadActivity({
-                  leadId: lead._id,
-                  ...leadData
-                });
-                await leadActivity.save();
+                  const leadActivity = new LeadActivity({
+                    leadId: lead._id,
+                    ...leadData
+                  });
+                  await leadActivity.save();
 
-                console.log('Meta lead created:', lead.leadID);
+                  console.log('Meta lead created:', lead.leadID);
                 } catch (leadError) {
                   console.error('Error creating lead:', leadError);
                   await sendMetaErrorEmail(
@@ -2025,7 +2025,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 }
               } catch (graphError) {
                 console.error('Error fetching lead from Graph API:', graphError.response?.data || graphError.message);
-                
+
                 // Send error notification email for Meta lead creation failure
                 await sendMetaErrorEmail(
                   `${platform === 'instagram' ? 'Instagram' : 'Facebook'} Lead Creation Failed`,
@@ -2050,7 +2050,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
 
   } catch (error) {
     console.error('Meta Ads webhook error:', error);
-    
+
     // Send error notification email for general Meta webhook errors
     sendMetaErrorEmail(
       'Meta Ads Webhook Error',
@@ -2061,7 +2061,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
         stack: error.stack
       }
     );
-    
+
     res.status(200).json({});
   }
 });
