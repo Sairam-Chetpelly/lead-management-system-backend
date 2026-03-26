@@ -202,6 +202,9 @@ const leadSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     required: false
   },
+  what_is_your_estimated_budget_for_the_interiors: {
+    type: String
+  },
   deletedAt: {
     type: Date,
     default: null
@@ -264,7 +267,8 @@ leadSchema.pre('save', async function(next) {
       adset: this.adset,
       campaign: this.campaign,
       cpUserName: this.cpUserName,
-      files: this.files
+      files: this.files,
+      what_is_your_estimated_budget_for_the_interiors: this.what_is_your_estimated_budget_for_the_interiors
     };
     
     const leadActivity = new LeadActivity(leadActivityData);

@@ -1888,7 +1888,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 }
 
                 const fieldData = graphResponse.data.field_data || [];
-                let name = '', email = '', phone_number = '';
+                let name = '', email = '', phone_number = '', what_is_your_estimated_budget_for_the_interiors = '';
                 const extraFields = [];
 
                 // Extract form data and collect extra fields
@@ -1900,8 +1900,10 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     name = value;
                   } else if (fieldName?.includes('email')) {
                     email = value;
-                  } else if (fieldName?.includes('phone_number')) {
+                  } else if (fieldName?.includes('phone_number') || fieldName?.includes('phone')) {
                     phone_number = value.replace(/[^\d]/g, '');
+                  } else if (fieldName?.includes('what_is_your_estimated_budget_for_the_interiors')) {
+                    what_is_your_estimated_budget_for_the_interiors = value;
                   } else {
                     // Collect all other fields as extra information
                   }
@@ -1979,6 +1981,9 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 };
                 if (phone_number && phone_number.length === 10) {
                   leadData.contactNumber = phone_number;
+                }
+                if (what_is_your_estimated_budget_for_the_interiors) {
+                  leadData.what_is_your_estimated_budget_for_the_interiors = what_is_your_estimated_budget_for_the_interiors;
                 }
 
                 // Assign to presales agent and set status
