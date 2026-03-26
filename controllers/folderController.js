@@ -141,7 +141,7 @@ exports.multiDownload = async (req, res) => {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
 
-    // Admin has unlimited downloads
+    // Admin has unlimited downloads, others have 50 limit
     if (userRole !== 'admin') {
       // Get today's start and end timestamps
       const startOfDay = new Date();
@@ -156,8 +156,8 @@ exports.multiDownload = async (req, res) => {
       });
 
       // Check if limit exceeded (considering bulk download as multiple downloads)
-      if (todayDownloads + documentIds.length > 5) {
-        return errorResponse(res, `Daily download limit exceeded. You can download ${5 - todayDownloads} more documents today. Limit resets at midnight.`, 400);
+      if (todayDownloads + documentIds.length > 50) {
+        return errorResponse(res, `Daily download limit exceeded. You can download ${50 - todayDownloads} more documents today. Limit resets at midnight.`, 400);
       }
     }
 
@@ -171,7 +171,7 @@ exports.multiDownload = async (req, res) => {
       return errorResponse(res, 'No valid documents found', 404);
     }
 
-    // Log downloads for non-admin users
+    // Log downloads for non-admin users only
     if (userRole !== 'admin') {
       const downloadLogs = documents.map(doc => ({
         userId: req.user.userId,
@@ -261,7 +261,7 @@ exports.downloadFolder = async (req, res) => {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
 
-    // Admin has unlimited downloads
+    // Admin has unlimited downloads, others have 50 limit
     if (userRole !== 'admin') {
       // Get today's start and end timestamps
       const startOfDay = new Date();
@@ -276,12 +276,12 @@ exports.downloadFolder = async (req, res) => {
       });
 
       // Check if limit exceeded
-      if (todayDownloads + documents.length > 5) {
-        return errorResponse(res, `Daily download limit exceeded. This folder contains ${documents.length} documents. You can download ${5 - todayDownloads} more documents today. Limit resets at midnight.`, 400);
+      if (todayDownloads + documents.length > 50) {
+        return errorResponse(res, `Daily download limit exceeded. This folder contains ${documents.length} documents. You can download ${50 - todayDownloads} more documents today. Limit resets at midnight.`, 400);
       }
     }
 
-    // Log downloads for non-admin users
+    // Log downloads for non-admin users only
     if (userRole !== 'admin') {
       const downloadLogs = documents.map(doc => ({
         userId: req.user.userId,

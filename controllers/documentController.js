@@ -249,7 +249,7 @@ exports.downloadDocument = async (req, res) => {
     const user = await User.findById(req.user.userId).populate('roleId');
     const userRole = user?.roleId?.slug;
 
-    // Admin has unlimited downloads
+    // Admin has unlimited downloads, others have 50 limit
     if (userRole !== 'admin') {
       // Get today's start and end timestamps
       const startOfDay = new Date();
@@ -264,11 +264,11 @@ exports.downloadDocument = async (req, res) => {
       });
 
       // Check if limit exceeded
-      if (todayDownloads >= 5) {
-        return errorResponse(res, 'Daily download limit reached. You can download up to 5 documents per day. Limit resets at midnight.', 400);
+      if (todayDownloads >= 50) {
+        return errorResponse(res, 'Daily download limit reached. You can download up to 50 documents per day. Limit resets at midnight.', 400);
       }
 
-      // Log the download
+      // Log the download for non-admin users only
       await DownloadLog.create({
         userId: req.user.userId,
         documentId: document._id,
