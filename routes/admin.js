@@ -8,6 +8,7 @@ const User = require('../models/User');
 const Lead = require('../models/Lead');
 const LeadActivity = require('../models/LeadActivity');
 const { authenticateToken } = require('../middleware/auth');
+const { successResponse, errorResponse } = require('../utils/response');
 const createCrudController = require('../utils/crudController');
 const router = express.Router();
 
@@ -48,7 +49,7 @@ router.delete('/users/:id', authenticateToken, async (req, res) => {
     
     const user = await User.findById(userId);
     if (!user || user.deletedAt) {
-      return res.status(404).json({ error: 'User not found' });
+      return errorResponse(res, 'User not found', 404);
     }
     
     // Check for related leads
@@ -62,9 +63,7 @@ router.delete('/users/:id', authenticateToken, async (req, res) => {
     });
     
     if (leadCount > 0) {
-      return res.status(400).json({ 
-        error: `Cannot delete user "${user.name}". This user has ${leadCount} lead${leadCount > 1 ? 's' : ''} assigned. Please reassign or remove them first.` 
-      });
+      return errorResponse(res, `Cannot delete user "${user.name}". This user has ${leadCount} lead${leadCount > 1 ? 's' : ''} assigned. Please reassign or remove them first.`, 400);
     }
     
     await User.findByIdAndUpdate(
@@ -73,9 +72,9 @@ router.delete('/users/:id', authenticateToken, async (req, res) => {
       { new: true }
     );
     
-    res.json({ message: 'User deleted successfully' });
+    return successResponse(res, null, 'User deleted successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -100,7 +99,7 @@ router.delete('/leads/:id', authenticateToken, async (req, res) => {
     }
     
     if (!leadActivity || leadActivity.deletedAt) {
-      return res.status(404).json({ error: 'Lead not found' });
+      return errorResponse(res, 'Lead not found', 404);
     }
     
     // Soft delete all lead activities for this lead
@@ -115,9 +114,9 @@ router.delete('/leads/:id', authenticateToken, async (req, res) => {
       { deletedAt: new Date() }
     );
     
-    res.json({ message: 'Lead deleted successfully' });
+    return successResponse(res, null, 'Lead deleted successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -147,17 +146,17 @@ router.get('/users', authenticateToken, async (req, res) => {
       User.countDocuments(filter)
     ]);
     
-    res.json({
-      data: users,
+    return successResponse(res, {
+      users,
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
         total,
         limit: parseInt(limit)
       }
-    });
+    }, 'Users retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -209,41 +208,125 @@ router.get('/centres', authenticateToken, async (req, res) => {
       })
     );
     
-    res.json({
-      data: centresWithCounts,
+    return successResponse(res, {
+      centres: centresWithCounts,
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
         total,
         limit: parseInt(limit)
       }
-    });
+    }, 'Centres retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 router.post('/centres', authenticateToken, [
   body('name').notEmpty().withMessage('Name is required'),
   body('slug').notEmpty().withMessage('Slug is required')
 ], centreController.create);
+// Export Routes (CSV file download) - MUST be before :id routes
+router.get('/centres/export-csv', authenticateToken, async (req, res) => {
+  try {
+    const { search = '' } = req.query;
+    const filter = { deletedAt: null };
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const centres = await Centre.find(filter).sort({ createdAt: -1 });
+    
+    const csvRows = [];
+    csvRows.push('Name,Slug,User Count,Lead Count,Created');
+    
+    for (const centre of centres) {
+      const [userCount, leadCount] = await Promise.all([
+        User.countDocuments({ centreId: centre._id, deletedAt: null }),
+        Lead.countDocuments({ centreId: centre._id, deletedAt: null })
+      ]);
+      
+      csvRows.push(`${centre.name},${centre.slug},${userCount},${leadCount},${centre.createdAt}`);
+    }
+    
+    const csvContent = csvRows.join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=centres.csv');
+    res.send(csvContent);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
+// Export Routes (JSON for CSV) - MUST be before :id routes
+router.get('/centres/export', authenticateToken, async (req, res) => {
+  try {
+    const centres = await Centre.find({ deletedAt: null }).sort({ createdAt: -1 });
+    
+    const csvData = await Promise.all(
+      centres.map(async (centre) => {
+        const [userCount, leadCount] = await Promise.all([
+          User.countDocuments({ centreId: centre._id, deletedAt: null }),
+          Lead.countDocuments({ centreId: centre._id, deletedAt: null })
+        ]);
+        
+        return {
+          'Name': centre.name,
+          'Slug': centre.slug,
+          'User Count': userCount,
+          'Lead Count': leadCount,
+          'Created': centre.createdAt
+        };
+      })
+    );
+    
+    return successResponse(res, csvData, 'Centres exported successfully', 200);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
+router.get('/centres/:id', authenticateToken, async (req, res) => {
+  try {
+    const centre = await Centre.findOne({ _id: req.params.id, deletedAt: null });
+    
+    if (!centre) {
+      return errorResponse(res, 'Centre not found', 404);
+    }
+    
+    const [userCount, leadCount] = await Promise.all([
+      User.countDocuments({ centreId: centre._id, deletedAt: null }),
+      Lead.countDocuments({ centreId: centre._id, deletedAt: null })
+    ]);
+    
+    return successResponse(res, {
+      ...centre.toObject(),
+      userCount,
+      leadCount
+    }, 'Centre retrieved successfully', 200);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
 router.put('/centres/:id', authenticateToken, centreController.update);
 router.delete('/centres/:id', authenticateToken, async (req, res) => {
   try {
     const centreId = req.params.id;
     
-    // Check if centre exists
     const centre = await Centre.findById(centreId);
     if (!centre || centre.deletedAt) {
-      return res.status(404).json({ error: 'Centre not found' });
+      return errorResponse(res, 'Centre not found', 404);
     }
     
-    // Check for related users
     const userCount = await User.countDocuments({ 
       centreId: centreId, 
       deletedAt: null 
     });
     
-    // Check for related leads (in LeadActivity)
     const leadCount = await LeadActivity.countDocuments({ 
       centreId: centreId, 
       deletedAt: null 
@@ -262,19 +345,18 @@ router.delete('/centres/:id', authenticateToken, async (req, res) => {
       
       message += relations.join(' and ') + '. Please reassign or remove them first.';
       
-      return res.status(400).json({ error: message });
+      return errorResponse(res, message, 400);
     }
     
-    // If no relations, proceed with soft delete
     await Centre.findByIdAndUpdate(
       centreId,
       { deletedAt: new Date() },
       { new: true }
     );
     
-    res.json({ message: 'Centre deleted successfully' });
+    return successResponse(res, null, 'Centre deleted successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -318,17 +400,106 @@ router.get('/languages', authenticateToken, async (req, res) => {
       })
     );
     
-    res.json({
-      data: languagesWithCounts,
+    return successResponse(res, {
+      languages: languagesWithCounts,
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
         total,
         limit: parseInt(limit)
       }
-    });
+    }, 'Languages retrieved successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
+  }
+});
+// Export Routes (CSV file download) - MUST be before :id routes
+router.get('/languages/export-csv', authenticateToken, async (req, res) => {
+  try {
+    const { search = '' } = req.query;
+    const filter = { deletedAt: null };
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } },
+        { code: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const languages = await Language.find(filter).sort({ createdAt: -1 });
+    
+    const csvRows = [];
+    csvRows.push('Name,Slug,Code,User Count,Lead Count,Created');
+    
+    for (const language of languages) {
+      const [userCount, leadCount] = await Promise.all([
+        User.countDocuments({ languageIds: language._id, deletedAt: null }),
+        LeadActivity.countDocuments({ languageId: language._id, deletedAt: null })
+      ]);
+      
+      csvRows.push(`${language.name},${language.slug},${language.code},${userCount},${leadCount},${language.createdAt}`);
+    }
+    
+    const csvContent = csvRows.join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=languages.csv');
+    res.send(csvContent);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
+// Export Routes (JSON for CSV) - MUST be before :id routes
+router.get('/languages/export', authenticateToken, async (req, res) => {
+  try {
+    const languages = await Language.find({ deletedAt: null }).sort({ createdAt: -1 });
+    
+    const csvData = await Promise.all(
+      languages.map(async (language) => {
+        const [userCount, leadCount] = await Promise.all([
+          User.countDocuments({ languageIds: language._id, deletedAt: null }),
+          LeadActivity.countDocuments({ languageId: language._id, deletedAt: null })
+        ]);
+        
+        return {
+          'Name': language.name,
+          'Slug': language.slug,
+          'Code': language.code,
+          'User Count': userCount,
+          'Lead Count': leadCount,
+          'Created': language.createdAt
+        };
+      })
+    );
+    
+    return successResponse(res, csvData, 'Languages exported successfully', 200);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
+router.get('/languages/:id', authenticateToken, async (req, res) => {
+  try {
+    const language = await Language.findOne({ _id: req.params.id, deletedAt: null });
+    
+    if (!language) {
+      return errorResponse(res, 'Language not found', 404);
+    }
+    
+    const [userCount, leadCount] = await Promise.all([
+      User.countDocuments({ languageIds: language._id, deletedAt: null }),
+      LeadActivity.countDocuments({ languageId: language._id, deletedAt: null })
+    ]);
+    
+    return successResponse(res, {
+      ...language.toObject(),
+      userCount,
+      leadCount
+    }, 'Language retrieved successfully', 200);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
   }
 });
 router.post('/languages', authenticateToken, [
@@ -343,7 +514,7 @@ router.delete('/languages/:id', authenticateToken, async (req, res) => {
     
     const language = await Language.findById(languageId);
     if (!language || language.deletedAt) {
-      return res.status(404).json({ error: 'Language not found' });
+      return errorResponse(res, 'Language not found', 404);
     }
     
     const userCount = await User.countDocuments({ 
@@ -369,7 +540,7 @@ router.delete('/languages/:id', authenticateToken, async (req, res) => {
       
       message += relations.join(' and ') + '. Please reassign or remove them first.';
       
-      return res.status(400).json({ error: message });
+      return errorResponse(res, message, 400);
     }
     
     await Language.findByIdAndUpdate(
@@ -378,9 +549,9 @@ router.delete('/languages/:id', authenticateToken, async (req, res) => {
       { new: true }
     );
     
-    res.json({ message: 'Language deleted successfully' });
+    return successResponse(res, null, 'Language deleted successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
@@ -397,7 +568,7 @@ router.delete('/statuses/:id', authenticateToken, async (req, res) => {
     
     const status = await Status.findById(statusId);
     if (!status || status.deletedAt) {
-      return res.status(404).json({ error: 'Status not found' });
+      return errorResponse(res, 'Status not found', 404);
     }
     
     const userCount = await User.countDocuments({ 
@@ -426,7 +597,7 @@ router.delete('/statuses/:id', authenticateToken, async (req, res) => {
       
       message += relations.join(' and ') + '. Please reassign or remove them first.';
       
-      return res.status(400).json({ error: message });
+      return errorResponse(res, message, 400);
     }
     
     await Status.findByIdAndUpdate(
@@ -435,67 +606,73 @@ router.delete('/statuses/:id', authenticateToken, async (req, res) => {
       { new: true }
     );
     
-    res.json({ message: 'Status deleted successfully' });
+    return successResponse(res, null, 'Status deleted successfully', 200);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return errorResponse(res, error.message, 500);
   }
 });
 
+
+
 // Export Routes (JSON for CSV)
+// Export Routes (CSV file download)
+router.get('/roles/export-csv', authenticateToken, async (req, res) => {
+  try {
+    const roles = await Role.find({ deletedAt: null }).sort({ createdAt: -1 });
+    
+    const csvRows = [];
+    csvRows.push('Name,Slug,Created');
+    
+    for (const role of roles) {
+      csvRows.push(`${role.name},${role.slug},${role.createdAt}`);
+    }
+    
+    const csvContent = csvRows.join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=roles.csv');
+    res.send(csvContent);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
+router.get('/statuses/export-csv', authenticateToken, async (req, res) => {
+  try {
+    const { search = '', type = '' } = req.query;
+    const filter = { deletedAt: null };
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (type) {
+      filter.type = type;
+    }
+    
+    const statuses = await Status.find(filter).sort({ createdAt: -1 });
+    
+    const csvRows = [];
+    csvRows.push('Name,Slug,Type,Created');
+    
+    for (const status of statuses) {
+      csvRows.push(`${status.name},${status.slug},${status.type},${status.createdAt}`);
+    }
+    
+    const csvContent = csvRows.join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=statuses.csv');
+    res.send(csvContent);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+});
+
 router.get('/roles/export', authenticateToken, roleController.export);
-router.get('/centres/export', authenticateToken, async (req, res) => {
-  try {
-    const centres = await Centre.find({ deletedAt: null }).sort({ createdAt: -1 });
-    
-    const csvData = await Promise.all(
-      centres.map(async (centre) => {
-        const [userCount, leadCount] = await Promise.all([
-          User.countDocuments({ centreId: centre._id, deletedAt: null }),
-          Lead.countDocuments({ centreId: centre._id, deletedAt: null })
-        ]);
-        
-        return {
-          'Name': centre.name,
-          'Slug': centre.slug,
-          'User Count': userCount,
-          'Lead Count': leadCount,
-          'Created': centre.createdAt
-        };
-      })
-    );
-    
-    res.json(csvData);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-router.get('/languages/export', authenticateToken, async (req, res) => {
-  try {
-    const languages = await Language.find({ deletedAt: null }).sort({ createdAt: -1 });
-    
-    const csvData = await Promise.all(
-      languages.map(async (language) => {
-        const [userCount, leadCount] = await Promise.all([
-          User.countDocuments({ languageIds: language._id, deletedAt: null }),
-          LeadActivity.countDocuments({ languageId: language._id, deletedAt: null })
-        ]);
-        
-        return {
-          'Name': language.name,
-          'Slug': language.slug,
-          'Code': language.code,
-          'User Count': userCount,
-          'Lead Count': leadCount,
-          'Created': language.createdAt
-        };
-      })
-    );
-    
-    res.json(csvData);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 router.get('/statuses/export', authenticateToken, statusController.export);
 
 module.exports = router;

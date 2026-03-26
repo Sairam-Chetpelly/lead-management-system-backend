@@ -35,6 +35,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { refreshMetaToken, getCurrentToken } = require('../utils/metaTokenRefresh');
 const { sendPreCreationEmail, sendPostCreationEmail, sendMetaErrorEmail, sendApuTirggerEmail, sendLeadgenEmail, sendPlatFormEmail, sendgraphResponseEmail } = require('../utils/metaEmailService');
 const whatsappService = require('../utils/whatsappService');
+const leadController = require('../controllers/leadController');
 
 // Email configuration
 const transporter = nodemailer.createTransport({
@@ -89,7 +90,7 @@ const documentStorage = multer.diskStorage({
 
 const documentUpload = multer({
   storage: documentStorage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
 });
 
 // Round robin assignment tracking
@@ -969,692 +970,25 @@ router.post('/bulk-upload', authenticateToken, csvUpload.single('file'), async (
 });
 
 // Get all leads with pagination and filters
-router.get('/', authenticateToken, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+router.get('/', authenticateToken, leadController.getAllLeads);
 
-    // Get user role for filtering
-    const user = await User.findById(req.user.userId).populate('roleId');
-    const userRole = user?.roleId?.slug;
+// Export leads CSV
+router.get('/export-csv', authenticateToken, leadController.exportCSV);
 
-    // Build filter for Lead table
-    const filter = { deletedAt: null };
 
-    // Role-based filtering
-    if (userRole === 'presales_agent') {
-      filter.presalesUserId = req.user.userId;
-      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-      if (leadStatus) {
-        filter.leadStatusId = leadStatus._id;
-      }
-    } else if (userRole === 'sales_agent') {
-      const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
-      const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
-
-      filter.salesUserId = req.user.userId;
-      if (wonStatus || lostStatus) {
-        filter.leadStatusId = {
-          $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean)
-        };
-      }
-    } else if (userRole === 'hod_presales' || userRole === 'manager_presales') {
-      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-      if (leadStatus) {
-        filter.leadStatusId = leadStatus._id;
-      }
-    } else if (userRole === 'hod_sales') {
-      // HOD sales can only see leads from their center
-      //filter.centreId = user.centreId;
-    } else if (userRole === 'sales_manager') {
-      // Sales manager can only see qualified leads from their center
-      filter.centreId = user.centreId;
-      const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
-      if (qualifiedStatus) {
-        filter.leadStatusId = qualifiedStatus._id;
-      }
-    }
-
-    // Apply search filters
-    if (req.query.search) {
-      const searchRegex = new RegExp(req.query.search, 'i');
-      filter.$or = [
-        { name: searchRegex },
-        { leadID: searchRegex },
-        { email: searchRegex },
-        { contactNumber: searchRegex }
-      ];
-    }
-
-    if (req.query.source) {
-      filter.sourceId = req.query.source;
-    }
-
-    if (req.query.leadValue) {
-      filter.leadValue = req.query.leadValue;
-    }
-
-    if (req.query.centre) {
-      filter.centreId = req.query.centre;
-    }
-
-    if (req.query.assignedTo) {
-      filter.$and = [
-        {
-          $or: [
-            { presalesUserId: req.query.assignedTo },
-            { salesUserId: req.query.assignedTo }
-          ]
-        }
-      ];
-    }
-
-    if (req.query.leadStatus) {
-      filter.leadStatusId = req.query.leadStatus;
-    }
-
-    if (req.query.leadSubStatus) {
-      filter.leadSubStatusId = req.query.leadSubStatus;
-    }
-
-    if (req.query.siteVisit) {
-      filter.siteVisit = req.query.siteVisit === 'true';
-    }
-
-    if (req.query.centerVisit) {
-      filter.centerVisit = req.query.centerVisit === 'true';
-    }
-
-    if (req.query.virtualMeeting) {
-      filter.virtualMeeting = req.query.virtualMeeting === 'true';
-    }
-
-    if (req.query.outOfStation) {
-      filter.outOfStation = req.query.outOfStation === 'true';
-    }
-
-    if (req.query.requirementWithinTwoMonths) {
-      filter.requirementWithinTwoMonths = req.query.requirementWithinTwoMonths === 'true';
-    }
-
-    if (req.query.adname) {
-      filter.adname = new RegExp(req.query.adname, 'i');
-    }
-
-    if (req.query.adset) {
-      filter.adset = new RegExp(req.query.adset, 'i');
-    }
-
-    if (req.query.campaign) {
-      filter.campaign = new RegExp(req.query.campaign, 'i');
-    }
-
-    // Date range filters - status-based or creation-based with OR logic for activities
-    if (req.query.dateFrom || req.query.dateTo) {
-      const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom + 'T00:00:00.000Z') : null;
-      const dateTo = req.query.dateTo ? new Date(req.query.dateTo + 'T23:59:59.999Z') : null;
-      console.log('Date range filter applied. From:', dateFrom, 'To:', dateTo);
-
-      // Check if any activity filters are selected
-      const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true';
-
-      if (hasActivityFilters) {
-        // Use OR logic for activity date fields
-        const activityDateConditions = [];
-
-        if (req.query.siteVisit === 'true') {
-          const siteVisitCondition = {};
-          if (dateFrom) siteVisitCondition.$gte = dateFrom;
-          if (dateTo) siteVisitCondition.$lte = dateTo;
-          if (Object.keys(siteVisitCondition).length > 0) {
-            activityDateConditions.push({ siteVisitDate: siteVisitCondition });
-          }
-        }
-
-        if (req.query.centerVisit === 'true') {
-          const centerVisitCondition = {};
-          if (dateFrom) centerVisitCondition.$gte = dateFrom;
-          if (dateTo) centerVisitCondition.$lte = dateTo;
-          if (Object.keys(centerVisitCondition).length > 0) {
-            activityDateConditions.push({ centerVisitDate: centerVisitCondition });
-          }
-        }
-
-        if (req.query.virtualMeeting === 'true') {
-          const virtualMeetingCondition = {};
-          if (dateFrom) virtualMeetingCondition.$gte = dateFrom;
-          if (dateTo) virtualMeetingCondition.$lte = dateTo;
-          if (Object.keys(virtualMeetingCondition).length > 0) {
-            activityDateConditions.push({ virtualMeetingDate: virtualMeetingCondition });
-          }
-        }
-
-        if (activityDateConditions.length > 0) {
-          filter.$or = filter.$or ? [...filter.$or, ...activityDateConditions] : activityDateConditions;
-        }
-      } else {
-        // Use single date field logic for non-activity filters
-        let dateField = 'createdAt'; // Default to creation date
-
-        // Use specific date fields based on status
-        if (req.query.leadStatus) {
-          const selectedStatus = await Status.findById(req.query.leadStatus);
-          if (selectedStatus?.slug === 'qualified') dateField = 'qualifiedDate';
-          else if (selectedStatus?.slug === 'won') dateField = 'leadWonDate';
-          else if (selectedStatus?.slug === 'lost') dateField = 'leadLostDate';
-          else if (selectedStatus?.slug === 'lead') dateField = 'createdAt';
-        }
-
-        // Use specific substatus date fields
-        if (req.query.leadSubStatus) {
-          const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
-          if (selectedSubStatus?.slug === 'hot') dateField = 'hotDate';
-          else if (selectedSubStatus?.slug === 'warm') dateField = 'warmDate';
-          else if (selectedSubStatus?.slug === 'interested') dateField = 'interestedDate';
-          else if (selectedSubStatus?.slug === 'cif') dateField = 'cifDate';
-          else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
-        }
-
-        console.log('Using date field for filtering:', dateField, 'From:', dateFrom, 'To:', dateTo);
-
-        // Build date filter condition
-        const dateCondition = {};
-        if (dateFrom) dateCondition.$gte = dateFrom;
-        if (dateTo) dateCondition.$lte = dateTo;
-
-        if (Object.keys(dateCondition).length > 0) {
-          filter[dateField] = dateCondition;
-        }
-      }
-    }
-    // Handle sorting
-    const sortBy = req.query.sortBy || 'createdAt';
-    const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
-    const sortObj = { [sortBy]: sortOrder };
-
-    // Get leads from Lead table
-    const [leads, total] = await Promise.all([
-      Lead.find(filter)
-        .populate([
-          { path: 'presalesUserId', select: 'name email mobileNumber' },
-          { path: 'salesUserId', select: 'name email mobileNumber' },
-          { path: 'languageId', select: 'name' },
-          { path: 'sourceId', select: 'name' },
-          { path: 'projectTypeId', select: 'name type' },
-          { path: 'houseTypeId', select: 'name type' },
-          { path: 'centreId', select: 'name' },
-          { path: 'leadStatusId', select: 'name slug' },
-          { path: 'leadSubStatusId', select: 'name slug' }
-        ])
-        .sort(sortObj)
-        .skip(skip)
-        .limit(limit),
-      Lead.countDocuments(filter)
-    ]);
-
-    // Add activity counts to leads
-    const leadsWithActivity = await Promise.all(
-      leads.map(async (lead) => {
-        const [callLogCount, activityLogCount] = await Promise.all([
-          CallLog.countDocuments({ leadId: lead._id, deletedAt: null }),
-          ActivityLog.countDocuments({ leadId: lead._id, deletedAt: null })
-        ]);
-
-        // Check if sales agent has made any activity when assigned to sales
-        let salesActivity = false;
-        if (lead.salesUserId) {
-          const [salesCallLogs, salesActivityLogs, salesLeadActivities] = await Promise.all([
-            CallLog.countDocuments({ leadId: lead._id, userId: lead.salesUserId, deletedAt: null }),
-            ActivityLog.countDocuments({ leadId: lead._id, userId: lead.salesUserId, deletedAt: null }),
-            LeadActivity.countDocuments({ leadId: lead._id, updatedPerson: lead.salesUserId, deletedAt: null })
-          ]);
-          salesActivity = salesCallLogs > 0 || salesActivityLogs > 0 || salesLeadActivities > 0;
-        }
-
-        return {
-          ...lead.toObject(),
-          callLogCount,
-          activityLogCount,
-          salesActivity,
-          hasActivity: callLogCount > 0 || activityLogCount > 0
-        };
-      })
-    );
-
-    res.json({
-      leads: leadsWithActivity,
-      pagination: {
-        current: page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
-
-  } catch (error) {
-    console.error('Error fetching leads:', error);
-    res.status(500).json({ error: 'Failed to fetch leads' });
-  }
-});
-
-// Export leads
-router.get('/export', authenticateToken, async (req, res) => {
-  try {
-    // Get user role for filtering
-    const user = await User.findById(req.user.userId).populate('roleId');
-    const userRole = user?.roleId?.slug;
-
-    // Build filter for Lead table (same as main leads endpoint)
-    const filter = { deletedAt: null };
-
-    // Role-based filtering
-    if (userRole === 'presales_agent') {
-      filter.presalesUserId = req.user.userId;
-      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-      if (leadStatus) {
-        filter.leadStatusId = leadStatus._id;
-      }
-    } else if (userRole === 'sales_agent') {
-      const wonStatus = await Status.findOne({ slug: 'won', type: 'leadStatus' });
-      const lostStatus = await Status.findOne({ slug: 'lost', type: 'leadStatus' });
-
-      filter.salesUserId = req.user.userId;
-      if (wonStatus || lostStatus) {
-        filter.leadStatusId = {
-          $nin: [wonStatus?._id, lostStatus?._id].filter(Boolean)
-        };
-      }
-    } else if (userRole === 'hod_presales' || userRole === 'manager_presales') {
-      const leadStatus = await Status.findOne({ slug: 'lead', type: 'leadStatus' });
-      if (leadStatus) {
-        filter.leadStatusId = leadStatus._id;
-      }
-    } else if (userRole === 'hod_sales') {
-      filter.centreId = user.centreId;
-    } else if (userRole === 'sales_manager') {
-      filter.centreId = user.centreId;
-      const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
-      if (qualifiedStatus) {
-        filter.leadStatusId = qualifiedStatus._id;
-      }
-    }
-
-    // Apply search filters
-    if (req.query.search) {
-      const searchRegex = new RegExp(req.query.search, 'i');
-      filter.$or = [
-        { name: searchRegex },
-        { leadID: searchRegex },
-        { email: searchRegex },
-        { contactNumber: searchRegex }
-      ];
-    }
-
-    if (req.query.source) filter.sourceId = req.query.source;
-    if (req.query.leadValue) filter.leadValue = req.query.leadValue;
-    if (req.query.centre) filter.centreId = req.query.centre;
-    if (req.query.assignedTo) {
-      filter.$and = [
-        {
-          $or: [
-            { presalesUserId: req.query.assignedTo },
-            { salesUserId: req.query.assignedTo }
-          ]
-        }
-      ];
-    }
-    if (req.query.leadStatus) filter.leadStatusId = req.query.leadStatus;
-    if (req.query.leadSubStatus) filter.leadSubStatusId = req.query.leadSubStatus;
-    if (req.query.siteVisit) filter.siteVisit = req.query.siteVisit === 'true';
-    if (req.query.centerVisit) filter.centerVisit = req.query.centerVisit === 'true';
-    if (req.query.virtualMeeting) filter.virtualMeeting = req.query.virtualMeeting === 'true';
-    if (req.query.outOfStation) filter.outOfStation = req.query.outOfStation === 'true';
-    if (req.query.requirementWithinTwoMonths) filter.requirementWithinTwoMonths = req.query.requirementWithinTwoMonths === 'true';
-    if (req.query.adname) filter.adname = new RegExp(req.query.adname, 'i');
-    if (req.query.adset) filter.adset = new RegExp(req.query.adset, 'i');
-    if (req.query.campaign) filter.campaign = new RegExp(req.query.campaign, 'i');
-
-    // Date range filters with OR logic for activities
-    if (req.query.dateFrom || req.query.dateTo) {
-      const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom + 'T00:00:00.000Z') : null;
-      const dateTo = req.query.dateTo ? new Date(req.query.dateTo + 'T23:59:59.999Z') : null;
-
-      // Check if any activity filters are selected
-      const hasActivityFilters = req.query.siteVisit === 'true' || req.query.centerVisit === 'true' || req.query.virtualMeeting === 'true';
-
-      if (hasActivityFilters) {
-        // Use OR logic for activity date fields
-        const activityDateConditions = [];
-
-        if (req.query.siteVisit === 'true') {
-          const siteVisitCondition = {};
-          if (dateFrom) siteVisitCondition.$gte = dateFrom;
-          if (dateTo) siteVisitCondition.$lte = dateTo;
-          if (Object.keys(siteVisitCondition).length > 0) {
-            activityDateConditions.push({ siteVisitDate: siteVisitCondition });
-          }
-        }
-
-        if (req.query.centerVisit === 'true') {
-          const centerVisitCondition = {};
-          if (dateFrom) centerVisitCondition.$gte = dateFrom;
-          if (dateTo) centerVisitCondition.$lte = dateTo;
-          if (Object.keys(centerVisitCondition).length > 0) {
-            activityDateConditions.push({ centerVisitDate: centerVisitCondition });
-          }
-        }
-
-        if (req.query.virtualMeeting === 'true') {
-          const virtualMeetingCondition = {};
-          if (dateFrom) virtualMeetingCondition.$gte = dateFrom;
-          if (dateTo) virtualMeetingCondition.$lte = dateTo;
-          if (Object.keys(virtualMeetingCondition).length > 0) {
-            activityDateConditions.push({ virtualMeetingDate: virtualMeetingCondition });
-          }
-        }
-
-        if (activityDateConditions.length > 0) {
-          filter.$or = filter.$or ? [...filter.$or, ...activityDateConditions] : activityDateConditions;
-        }
-      } else {
-        // Use single date field logic for non-activity filters
-        let dateField = 'createdAt';
-
-        if (req.query.leadStatus) {
-          const selectedStatus = await Status.findById(req.query.leadStatus);
-          if (selectedStatus?.slug === 'won') dateField = 'leadWonDate';
-          else if (selectedStatus?.slug === 'lost') dateField = 'leadLostDate';
-          else if (selectedStatus?.slug === 'qualified') dateField = 'qualifiedDate';
-          else if (selectedStatus?.slug === 'lead') dateField = 'createdAt';
-        }
-
-        if (req.query.leadSubStatus) {
-          const selectedSubStatus = await Status.findById(req.query.leadSubStatus);
-          if (selectedSubStatus?.slug === 'hot') dateField = 'hotDate';
-          else if (selectedSubStatus?.slug === 'warm') dateField = 'warmDate';
-          else if (selectedSubStatus?.slug === 'interested') dateField = 'interestedDate';
-          else if (selectedSubStatus?.slug === 'cif') dateField = 'cifDate';
-          else if (selectedSubStatus?.slug === 'meeting-arranged') dateField = 'meetingArrangedDate';
-        }
-
-        // Build date filter condition
-        const dateCondition = {};
-        if (dateFrom) dateCondition.$gte = dateFrom;
-        if (dateTo) dateCondition.$lte = dateTo;
-
-        if (Object.keys(dateCondition).length > 0) {
-          filter[dateField] = dateCondition;
-        }
-      }
-    }
-
-    // Handle sorting for export
-    const sortBy = req.query.sortBy || 'createdAt';
-    const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
-    const sortObj = { [sortBy]: sortOrder };
-
-    const leads = await Lead.find(filter)
-      .populate([
-        { path: 'presalesUserId', select: 'name email mobileNumber' },
-        { path: 'salesUserId', select: 'name email mobileNumber' },
-        { path: 'updatedPerson', select: 'name email' },
-        { path: 'languageId', select: 'name' },
-        { path: 'sourceId', select: 'name' },
-        { path: 'projectTypeId', select: 'name type' },
-        { path: 'houseTypeId', select: 'name type' },
-        { path: 'centreId', select: 'name' },
-        { path: 'leadStatusId', select: 'name slug' },
-        { path: 'leadSubStatusId', select: 'name slug' }
-      ])
-      .sort(sortObj);
-
-    // Helper function to clean text for CSV
-    const cleanTextForCSV = (text) => {
-      if (!text) return '';
-      return String(text).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
-    };
-
-    const csvData = leads.map(lead => ({
-      'Lead ID': lead.leadID,
-      'Name': cleanTextForCSV(lead.name),
-      'Email': lead.email || '',
-      'Contact Number': lead.contactNumber || '',
-      'Source': lead.sourceId?.name || '',
-      'Centre': lead.centreId?.name || '',
-      'Presales Agent': lead.presalesUserId?.name || '',
-      'Sales Agent': lead.salesUserId?.name || '',
-      'Lead Status': lead.leadStatusId?.name || '',
-      'Lead Sub Status': lead.leadSubStatusId?.name || '',
-      'Lead Value': lead.leadValue || '',
-      'Language': lead.languageId?.name || '',
-      'Project Type': lead.projectTypeId?.name || '',
-      'House Type': lead.houseTypeId?.name || '',
-      'Project Value': cleanTextForCSV(lead.projectValue),
-      'Apartment Name': cleanTextForCSV(lead.apartmentName),
-      'Expected Possession Date': lead.expectedPossessionDate ? new Date(lead.expectedPossessionDate).toLocaleDateString() : '',
-      'Site Visit': lead.siteVisit ? 'Yes' : 'No',
-      'Site Visit Date': lead.siteVisitDate ? new Date(lead.siteVisitDate).toLocaleDateString() : '',
-      'Site Visit Completed Date': lead.siteVisitCompletedDate ? new Date(lead.siteVisitCompletedDate).toLocaleDateString() : '',
-      'Center Visit': lead.centerVisit ? 'Yes' : 'No',
-      'Center Visit Date': lead.centerVisitDate ? new Date(lead.centerVisitDate).toLocaleDateString() : '',
-      'Center Visit Completed Date': lead.centerVisitCompletedDate ? new Date(lead.centerVisitCompletedDate).toLocaleDateString() : '',
-      'Virtual Meeting': lead.virtualMeeting ? 'Yes' : 'No',
-      'Virtual Meeting Date': lead.virtualMeetingDate ? new Date(lead.virtualMeetingDate).toLocaleDateString() : '',
-      'Virtual Meeting Completed Date': lead.virtualMeetingCompletedDate ? new Date(lead.virtualMeetingCompletedDate).toLocaleDateString() : '',
-      'CIF Date': lead.cifDate ? new Date(lead.cifDate).toLocaleDateString() : '',
-      'Meeting Arranged Date': lead.meetingArrangedDate ? new Date(lead.meetingArrangedDate).toLocaleDateString() : '',
-      'Qualified Date': lead.qualifiedDate ? new Date(lead.qualifiedDate).toLocaleDateString() : '',
-      'Hot Date': lead.hotDate ? new Date(lead.hotDate).toLocaleDateString() : '',
-      'Warm Date': lead.warmDate ? new Date(lead.warmDate).toLocaleDateString() : '',
-      'Interested Date': lead.interestedDate ? new Date(lead.interestedDate).toLocaleDateString() : '',
-      'Won Date': lead.leadWonDate ? new Date(lead.leadWonDate).toLocaleDateString() : '',
-      'Lost Date': lead.leadLostDate ? new Date(lead.leadLostDate).toLocaleDateString() : '',
-      'Comment': cleanTextForCSV(lead.comment),
-      'Out of Station': lead.outOfStation ? 'Yes' : 'No',
-      'Requirement Within Two Months': lead.requirementWithinTwoMonths ? 'Yes' : 'No',
-      'Ad Name': cleanTextForCSV(lead?.adname) || '',
-      'Ad Set': cleanTextForCSV(lead?.adset) || '',
-      'Ad Campaign': cleanTextForCSV(lead?.campaign) || '',
-      'CP User Name': cleanTextForCSV(lead?.cpUserName) || '',
-      'Updated By': lead.updatedPerson?.name || '',
-      'Created At': new Date(lead.createdAt).toLocaleString(),
-      'Updated At': new Date(lead.updatedAt).toLocaleString()
-    }));
-
-    res.json(csvData);
-  } catch (error) {
-    console.error('Error exporting leads:', error);
-    res.status(500).json({ error: 'Failed to export leads' });
-  }
-});
 
 // Get all lead activities for a lead
-router.get('/:id/activities', authenticateToken, async (req, res) => {
-  try {
-    // Check if the lead exists
-    const lead = await Lead.findById(req.params.id);
-    if (!lead || lead.deletedAt) {
-      return res.status(404).json({ error: 'Lead not found' });
-    }
-
-    // Get all lead activities for this lead
-    const leadActivities = await LeadActivity.find({ leadId: req.params.id, deletedAt: null })
-      .populate([
-        { path: 'presalesUserId', select: 'name email mobileNumber' },
-        { path: 'salesUserId', select: 'name email mobileNumber' },
-        { path: 'updatedPerson', select: 'name email' },
-        { path: 'languageId', select: 'name' },
-        { path: 'sourceId', select: 'name' },
-        { path: 'projectTypeId', select: 'name type' },
-        { path: 'houseTypeId', select: 'name type' },
-        { path: 'centreId', select: 'name' },
-        { path: 'leadStatusId', select: 'name slug' },
-        { path: 'leadSubStatusId', select: 'name slug' }
-      ])
-      .sort({ createdAt: -1 });
-
-    res.json({ leadActivities });
-  } catch (error) {
-    console.error('Error fetching lead activities:', error);
-    res.status(500).json({ error: 'Failed to fetch lead activities' });
-  }
-});
+router.get('/:id/activities', authenticateToken, leadController.getLeadActivities);
 
 // Get lead by ID with activity data
-router.get('/:id', authenticateToken, async (req, res) => {
-  try {
-    // Get user role for access control
-    const user = await User.findById(req.user.userId).populate('roleId');
-    const userRole = user?.roleId?.slug;
-
-    // Find the lead
-    const lead = await Lead.findById(req.params.id)
-      .populate([
-        { path: 'presalesUserId', select: 'name email mobileNumber' },
-        { path: 'salesUserId', select: 'name email mobileNumber' },
-        { path: 'updatedPerson', select: 'name email' },
-        { path: 'languageId', select: 'name' },
-        { path: 'sourceId', select: 'name' },
-        { path: 'projectTypeId', select: 'name type' },
-        { path: 'houseTypeId', select: 'name type' },
-        { path: 'centreId', select: 'name' },
-        { path: 'leadStatusId', select: 'name slug' },
-        { path: 'leadSubStatusId', select: 'name slug' }
-      ]);
-
-    if (!lead || lead.deletedAt) {
-      return res.status(404).json({ error: 'Lead not found' });
-    }
-
-    // Check center access for HOD sales
-    // if (userRole === 'hod_sales' && (!lead.centreId || !lead.centreId.equals(user.centreId))) {
-    //   return res.status(403).json({ error: 'Access denied: Lead not from your center' });
-    // }
-
-    // Check center and qualified status access for sales manager
-    if (userRole === 'sales_manager') {
-      if (!lead.centreId || !lead.centreId.equals(user.centreId)) {
-        return res.status(403).json({ error: 'Access denied: Lead not from your center' });
-      }
-      const qualifiedStatus = await Status.findOne({ slug: 'qualified', type: 'leadStatus' });
-      if (!qualifiedStatus || !lead.leadStatusId.equals(qualifiedStatus._id)) {
-        return res.status(403).json({ error: 'Access denied: Only qualified leads allowed' });
-      }
-    }
-
-    // Get call logs linked to the Lead
-    const callLogs = await CallLog.find({ leadId: lead._id, deletedAt: null })
-      .populate('userId', 'name email')
-      .sort({ createdAt: -1 });
-
-    // Get activity logs linked to the Lead
-    const activityLogs = await ActivityLog.find({ leadId: lead._id, deletedAt: null })
-      .populate('userId', 'name email')
-      .sort({ createdAt: -1 });
-
-    res.json({
-      lead: lead,
-      callLogs,
-      activityLogs
-    });
-  } catch (error) {
-    console.error('Error fetching lead:', error);
-    res.status(500).json({ error: 'Failed to fetch lead' });
-  }
-});
-
-// Get lead activity timeline
-router.get('/:id/timeline', authenticateToken, async (req, res) => {
-  try {
-    // Validate ObjectId format
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid lead ID format' });
-    }
-
-    // Find the lead directly
-    const lead = await Lead.findById(req.params.id);
-    if (!lead || lead.deletedAt) {
-      return res.status(404).json({ error: 'Lead not found' });
-    }
-
-    const actualLeadId = lead._id;
-
-    // Get call logs linked to the actual Lead
-    const callLogs = await CallLog.find({ leadId: actualLeadId, deletedAt: null })
-      .populate('userId', 'name email')
-      .sort({ createdAt: -1 });
-
-    // Get activity logs linked to the actual Lead
-    const activityLogs = await ActivityLog.find({ leadId: actualLeadId, deletedAt: null })
-      .populate('userId', 'name email')
-      .sort({ createdAt: -1 });
-
-    // Combine and sort by date
-    const timeline = [
-      ...callLogs.map(log => ({
-        ...log.toObject(),
-        type: 'call',
-        title: 'Call Made',
-        description: `Call made by ${log.userId.name}`,
-        timestamp: log.createdAt
-      })),
-      ...activityLogs.map(log => ({
-        ...log.toObject(),
-        type: log.type,
-        title: log.type === 'call' ? 'Call Activity' : 'Manual Activity',
-        description: log.comment,
-        timestamp: log.createdAt
-      }))
-    ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-    res.json({ timeline });
-  } catch (error) {
-    console.error('Error fetching timeline:', error);
-    res.status(500).json({ error: 'Failed to fetch timeline' });
-  }
-});
+router.get('/:id/timeline', authenticateToken, leadController.getLeadTimeline);
+router.get('/:id', authenticateToken, leadController.getLeadById);
 
 // Create call log
-router.post('/:id/call', authenticateToken, async (req, res) => {
-  try {
+router.post('/:id/call', authenticateToken, leadController.createCallLog);
 
-    // Determine the actual Lead ID
-    let actualLeadId = null;
-
-    // Try to find as LeadActivity first
-    try {
-      const leadActivity = await LeadActivity.findById(req.params.id);
-      if (leadActivity) {
-        actualLeadId = leadActivity.leadId;
-      }
-      const lead = await Lead.findById(req.params.id);
-      if (lead) {
-        actualLeadId = lead._id;
-      }
-    } catch (err) {
-      // If not found as LeadActivity, try as Lead ID directly
-    }
-
-    if (!actualLeadId) {
-      return res.status(404).json({ error: 'Lead not found' });
-    }
-
-    const callLog = new CallLog({
-      userId: req.user.userId,
-      leadId: actualLeadId,
-      dateTime: new Date()
-    });
-
-    await callLog.save();
-    await callLog.populate('userId', 'name email');
-
-    res.status(201).json({ message: 'Call log created successfully', callLog });
-  } catch (error) {
-    console.error('Error creating call log:', error);
-    res.status(500).json({ error: 'Failed to create call log' });
-  }
-});
+// Download recording for call log
+router.get('/call/:id/recording', authenticateToken, leadController.downloadRecording);
 
 // Create activity log
 router.post('/:id/activity', authenticateToken, documentUpload.single('document'), async (req, res) => {
@@ -1918,7 +1252,7 @@ router.post('/:id/lead-activity', authenticateToken, documentUpload.array('files
       'languageId', 'centreId', 'projectTypeId', 'projectValue', 'apartmentName',
       'houseTypeId', 'expectedPossessionDate', 'leadValue',
       'siteVisit', 'siteVisitDate', 'siteVisitCompletedDate', 'centerVisit', 'centerVisitDate', 'centerVisitCompletedDate',
-      'virtualMeeting', 'virtualMeetingDate', 'virtualMeetingCompletedDate', 'meetingArrangedDate', 'comment', 'cifDate',
+      'virtualMeeting', 'virtualMeetingDate', 'virtualMeetingCompletedDate', 'leadClosure', 'leadClosureDate', 'meetingArrangedDate', 'comment', 'cifDate',
       'outOfStation', 'requirementWithinTwoMonths', 'cpUserName'
     ];
 
@@ -2133,29 +1467,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete lead
-router.delete('/:id', async (req, res) => {
-  try {
-    const lead = await Lead.findById(req.params.id);
-    if (!lead || lead.deletedAt) {
-      return res.status(404).json({ error: 'Lead not found' });
-    }
-
-    // Soft delete the lead
-    lead.deletedAt = new Date();
-    await lead.save();
-
-    // Also soft delete all related lead activities
-    await LeadActivity.updateMany(
-      { leadId: lead._id, deletedAt: null },
-      { deletedAt: new Date() }
-    );
-
-    res.json({ message: 'Lead deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting lead:', error);
-    res.status(500).json({ error: 'Failed to delete lead' });
-  }
-});
+router.delete('/:id', leadController.deleteLead);
 
 // Assign lead to user
 router.post('/:id/assign', authenticateToken, async (req, res) => {
@@ -2518,14 +1830,14 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     throw tokenError;
                   }
                 }
-
+                
                 // Get platform from response
                 if (graphResponse.data.platform) {
                   const platformValue = graphResponse.data.platform.toLowerCase();
                   platform = platformValue === 'fb' ? 'facebook' : platformValue === 'ig' ? 'instagram' : platformValue;
                   console.log('Platform identified:', platform);
                 }
-
+                
                 // Fetch ad details for campaign info
                 const adResponse = await axios.get(
                   `https://graph.facebook.com/v23.0/${ad_id}`,
@@ -2536,11 +1848,10 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     }
                   }
                 );
-
+                
                 adname = adResponse.data.name || '';
                 adsetName = adResponse.data.adset?.name || '';
                 campaignName = adResponse.data?.campaign?.name || '';
-
               } catch (adError) {
                 console.log('Could not fetch ad details, defaulting to facebook:', adError.message);
               }
@@ -2577,7 +1888,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 }
 
                 const fieldData = graphResponse.data.field_data || [];
-                let name = '', email = '', phone_number = '';
+                let name = '', email = '', phone_number = '', what_is_your_estimated_budget_for_the_interiors = '';
                 const extraFields = [];
 
                 // Extract form data and collect extra fields
@@ -2589,8 +1900,10 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     name = value;
                   } else if (fieldName?.includes('email')) {
                     email = value;
-                  } else if (fieldName?.includes('phone_number')) {
+                  } else if (fieldName?.includes('phone_number') || fieldName?.includes('phone')) {
                     phone_number = value.replace(/[^\d]/g, '');
+                  } else if (fieldName?.includes('what_is_your_estimated_budget_for_the_interiors')) {
+                    what_is_your_estimated_budget_for_the_interiors = value;
                   } else {
                     // Collect all other fields as extra information
                   }
@@ -2668,6 +1981,9 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 };
                 if (phone_number && phone_number.length === 10) {
                   leadData.contactNumber = phone_number;
+                }
+                if (what_is_your_estimated_budget_for_the_interiors) {
+                  leadData.what_is_your_estimated_budget_for_the_interiors = what_is_your_estimated_budget_for_the_interiors;
                 }
 
                 // Assign to presales agent and set status
@@ -2750,49 +2066,9 @@ router.post('/webhook/meta-ads', async (req, res) => {
   }
 });
 
-// Test API to manually trigger Meta token refresh
-router.post('/test/refresh-token', async (req, res) => {
-  try {
-    console.log('Manual token refresh triggered via API');
-    await refreshMetaToken();
-    const currentToken = await getCurrentToken();
-    res.json({
-      message: 'Token refresh completed successfully',
-      tokenExists: !!currentToken,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Manual token refresh failed:', error);
-    res.status(500).json({
-      error: 'Token refresh failed',
-      details: error.message
-    });
-  }
-});
+
 
 // Serve activity documents
-router.get('/document/:filename', (req, res) => {
-  const filename = req.params.filename;
-  const filePath = path.join(__dirname, '../uploads/documents', filename);
-
-  if (fs.existsSync(filePath)) {
-    const ext = path.extname(filename).toLowerCase();
-    const mimeTypes = {
-      '.pdf': 'application/pdf',
-      '.doc': 'application/msword',
-      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png'
-    };
-
-    const contentType = mimeTypes[ext] || 'application/octet-stream';
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.sendFile(filePath);
-  } else {
-    res.status(404).json({ error: 'Document not found' });
-  }
-});
+router.get('/document/:filename', leadController.getDocument);
 
 module.exports = router;

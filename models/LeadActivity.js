@@ -18,7 +18,7 @@ const leadActivitySchema = new mongoose.Schema({
     type: String,
     required: false,
     validate: {
-      validator: function(v) {
+      validator: function (v) {
         return /^\d{10}$/.test(v);
       },
       message: 'Contact number must be exactly 10 digits'
@@ -127,6 +127,14 @@ const leadActivitySchema = new mongoose.Schema({
     type: Date,
     required: false
   },
+  leadClosure: {
+    type: Boolean,
+    required: false
+  },
+  leadClosureDate: {
+    type: Date,
+    required: false
+  },
   meetingArrangedDate: {
     type: String,
     required: false
@@ -193,6 +201,9 @@ const leadActivitySchema = new mongoose.Schema({
   files: {
     type: mongoose.Schema.Types.Mixed,
     required: false
+  },
+  what_is_your_estimated_budget_for_the_interiors: {
+    type: String
   },
   deletedAt: {
     type: Date,

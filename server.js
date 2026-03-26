@@ -9,6 +9,7 @@ process.env.TZ = 'Asia/Kolkata';
 
 // Import middleware
 const apiKeyAuth = require('./middleware/apiKeyAuth');
+const CronService = require('./services/cronService');
 
 // Import routes at top
 const authRoutes = require('./routes/auth');
@@ -21,8 +22,10 @@ const dashboardRoutes = require('./routes/dashboard');
 const callLogRoutes = require('./routes/callLogs');
 const activityLogRoutes = require('./routes/activityLogs');
 const leadActivityRoutes = require('./routes/leadActivities');
-const metaRoutes = require('./routes/meta');
-const { startTokenScheduler } = require('./utils/tokenScheduler');
+const documentRoutes = require('./routes/documents');
+const folderRoutes = require('./routes/folders');
+const keywordRoutes = require('./routes/keywords');
+const categoryRoutes = require('./routes/categories');
 
 const app = express();
 
@@ -31,8 +34,8 @@ app.use(cors({
   origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000','https://crm.reminiscent.in'],
   credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -62,7 +65,7 @@ const userLimiter = rateLimit({
 app.use('/api/auth', publicLimiter);
 app.use('/api', userLimiter);
 
-// API Key protection for all routes except health check, document serving, and webhooks
+// API Key protection for all routes except health check, document serving, webhooks
 app.use('/api', (req, res, next) => {
   if (req.path === '/health' || req.path.startsWith('/leads/document/') || req.path.startsWith('/leads/webhook/')) {
     return next();
@@ -74,8 +77,8 @@ app.use('/api', (req, res, next) => {
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
     console.log('MongoDB connected');
-    // Start token scheduler after DB connection
-    // startTokenScheduler();
+    // Start cron jobs after database connection
+    CronService.startCronJobs();
   })
   .catch(err => console.error('MongoDB connection error:', err));
 
@@ -95,7 +98,11 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/call-logs', callLogRoutes);
 app.use('/api/activity-logs', activityLogRoutes);
 app.use('/api/lead-activities', leadActivityRoutes);
-app.use('/api/meta', metaRoutes);
+app.use('/api/documents', documentRoutes);
+app.use('/api/folders', folderRoutes);
+app.use('/api/keywords', keywordRoutes);
+app.use('/api/categories', categoryRoutes);
+
 
 // For Vercel deployment
 module.exports = app;

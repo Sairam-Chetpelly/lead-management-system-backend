@@ -19,6 +19,21 @@ const callLogSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
+  callStartTime: {
+    type: Date
+  },
+  callEndTime: {
+    type: Date
+  },
+  durationSeconds: {
+    type: Number
+  },
+  comment: {
+    type: String
+  },
+  recording: {
+    type: String
+  },
   deletedAt: {
     type: Date,
     default: null

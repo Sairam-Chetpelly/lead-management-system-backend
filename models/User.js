@@ -94,6 +94,12 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  resetPasswordOTP: {
+    type: String
+  },
+  resetPasswordOTPExpiry: {
+    type: Date
+  },
   deletedAt: {
     type: Date,
     default: null

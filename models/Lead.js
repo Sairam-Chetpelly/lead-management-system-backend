@@ -127,6 +127,14 @@ const leadSchema = new mongoose.Schema({
     type: Date,
     required: false
   },
+  leadClosure: {
+    type: Boolean,
+    required: false
+  },
+  leadClosureDate: {
+    type: Date,
+    required: false
+  },
   meetingArrangedDate: {
     type: String,
     required: false
@@ -194,6 +202,9 @@ const leadSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     required: false
   },
+  what_is_your_estimated_budget_for_the_interiors: {
+    type: String
+  },
   deletedAt: {
     type: Date,
     default: null
@@ -239,6 +250,8 @@ leadSchema.pre('save', async function(next) {
       virtualMeeting: this.virtualMeeting,
       virtualMeetingDate: this.virtualMeetingDate,
       virtualMeetingCompletedDate: this.virtualMeetingCompletedDate,
+      leadClosure: this.leadClosure,
+      leadClosureDate: this.leadClosureDate,
       meetingArrangedDate: this.meetingArrangedDate,
       cifDate: this.cifDate,
       leadWonDate: this.leadWonDate,
@@ -254,7 +267,8 @@ leadSchema.pre('save', async function(next) {
       adset: this.adset,
       campaign: this.campaign,
       cpUserName: this.cpUserName,
-      files: this.files
+      files: this.files,
+      what_is_your_estimated_budget_for_the_interiors: this.what_is_your_estimated_budget_for_the_interiors
     };
     
     const leadActivity = new LeadActivity(leadActivityData);
