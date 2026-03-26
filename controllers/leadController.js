@@ -93,7 +93,14 @@ exports.exportCSV = async (req, res) => {
     if (req.query.siteVisit) filter.siteVisit = req.query.siteVisit === 'true';
     if (req.query.centerVisit) filter.centerVisit = req.query.centerVisit === 'true';
     if (req.query.virtualMeeting) filter.virtualMeeting = req.query.virtualMeeting === 'true';
-    if (req.query.leadClosure) filter.leadClosure = req.query.leadClosure === 'true';
+    if (req.query.leadClosure) {
+      if (req.query.leadClosure === 'true') {
+        filter.leadClosure = true;
+      } else if (req.query.leadClosure === 'false') {
+        filter.$or = filter.$or || [];
+        filter.$or.push({ leadClosure: false }, { leadClosure: { $exists: false } });
+      }
+    }
     if (req.query.outOfStation) filter.outOfStation = req.query.outOfStation === 'true';
     if (req.query.requirementWithinTwoMonths) filter.requirementWithinTwoMonths = req.query.requirementWithinTwoMonths === 'true';
     if (req.query.adname) filter.adname = new RegExp(req.query.adname, 'i');
@@ -302,7 +309,14 @@ exports.getAllLeads = async (req, res) => {
     if (req.query.siteVisit) filter.siteVisit = req.query.siteVisit === 'true';
     if (req.query.centerVisit) filter.centerVisit = req.query.centerVisit === 'true';
     if (req.query.virtualMeeting) filter.virtualMeeting = req.query.virtualMeeting === 'true';
-    if (req.query.leadClosure) filter.leadClosure = req.query.leadClosure === 'true';
+    if (req.query.leadClosure) {
+      if (req.query.leadClosure === 'true') {
+        filter.leadClosure = true;
+      } else if (req.query.leadClosure === 'false') {
+        filter.$or = filter.$or || [];
+        filter.$or.push({ leadClosure: false }, { leadClosure: { $exists: false } });
+      }
+    }
     if (req.query.outOfStation) filter.outOfStation = req.query.outOfStation === 'true';
     if (req.query.requirementWithinTwoMonths) filter.requirementWithinTwoMonths = req.query.requirementWithinTwoMonths === 'true';
     if (req.query.adname) filter.adname = new RegExp(req.query.adname, 'i');
