@@ -19,6 +19,15 @@ const folderSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  s3Path: {
+    type: String,
+    default: null
+  },
+  storageType: {
+    type: String,
+    enum: ['local', 's3', 'both'],
+    default: 'both'
+  },
   deletedAt: {
     type: Date,
     default: null

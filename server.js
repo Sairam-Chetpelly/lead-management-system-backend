@@ -23,7 +23,9 @@ const callLogRoutes = require('./routes/callLogs');
 const activityLogRoutes = require('./routes/activityLogs');
 const leadActivityRoutes = require('./routes/leadActivities');
 const documentRoutes = require('./routes/documents');
+const s3DocumentRoutes = require('./routes/s3Documents');
 const folderRoutes = require('./routes/folders');
+const s3FolderRoutes = require('./routes/s3Folders');
 const keywordRoutes = require('./routes/keywords');
 const categoryRoutes = require('./routes/categories');
 
@@ -99,7 +101,9 @@ app.use('/api/call-logs', callLogRoutes);
 app.use('/api/activity-logs', activityLogRoutes);
 app.use('/api/lead-activities', leadActivityRoutes);
 app.use('/api/documents', documentRoutes);
+app.use('/api/s3-documents', s3DocumentRoutes);
 app.use('/api/folders', folderRoutes);
+app.use('/api/s3-folders', s3FolderRoutes);
 app.use('/api/keywords', keywordRoutes);
 app.use('/api/categories', categoryRoutes);
 
