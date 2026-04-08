@@ -3,6 +3,7 @@ const Document = require('../models/Document');
 const DownloadLog = require('../models/DownloadLog');
 const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response');
+const { createS3Folder, deleteS3Folder, generateS3FolderPath } = require('../utils/s3Service');
 const archiver = require('archiver');
 const path = require('path');
 const fs = require('fs');
@@ -12,14 +13,48 @@ exports.createFolder = async (req, res) => {
   try {
     const { name, parentFolderId, restricted } = req.body;
     
+    // Validate parent folder exists and is not deleted
+    if (parentFolderId) {
+      const parentFolder = await Folder.findOne({
+        _id: parentFolderId,
+        deletedAt: null
+      });
+      
+      if (!parentFolder) {
+        return errorResponse(res, 'Parent folder not found or has been deleted', 400);
+      }
+    }
+    
+    // Check if folder with same name already exists in the same parent
+    const existingFolder = await Folder.findOne({
+      name: name.trim(),
+      parentFolderId: parentFolderId || null,
+      deletedAt: null
+    });
+    
+    if (existingFolder) {
+      return errorResponse(res, 'A folder with this name already exists in this location', 400);
+    }
+    
     const folder = new Folder({
-      name,
+      name: name.trim(),
       parentFolderId,
       restricted: restricted || false,
       createdBy: req.user.userId
     });
 
     await folder.save();
+    
+    // Create corresponding folder in S3
+    try {
+      const s3FolderPath = await generateS3FolderPath(folder._id, name.trim(), parentFolderId);
+      await createS3Folder(s3FolderPath);
+      console.log(`S3 folder created: ${s3FolderPath}`);
+    } catch (s3Error) {
+      console.error('Failed to create S3 folder:', s3Error);
+      // Continue execution - don't fail the entire operation for S3 error
+    }
+    
     await folder.populate('createdBy', 'name email');
     return successResponse(res, folder, 'Folder created successfully', 201);
   } catch (error) {
@@ -81,23 +116,62 @@ exports.getFolderContents = async (req, res) => {
 exports.updateFolder = async (req, res) => {
   try {
     const { name, restricted } = req.body;
-    const updateData = { name };
+    const folder = await Folder.findById(req.params.id);
+    
+    if (!folder) {
+      return errorResponse(res, 'Folder not found', 404);
+    }
+    
+    const oldName = folder.name;
+    const updateData = {};
+    
+    // Check for duplicate name if name is being changed
+    if (name && name.trim() !== oldName) {
+      const existingFolder = await Folder.findOne({
+        name: name.trim(),
+        parentFolderId: folder.parentFolderId,
+        deletedAt: null,
+        _id: { $ne: folder._id } // Exclude current folder
+      });
+      
+      if (existingFolder) {
+        return errorResponse(res, 'A folder with this name already exists in this location', 400);
+      }
+      
+      updateData.name = name.trim();
+    }
     
     // Only allow restricted field update if provided
     if (typeof restricted === 'boolean') {
       updateData.restricted = restricted;
     }
     
-    const folder = await Folder.findOneAndUpdate(
+    // Update folder name in S3 if name changed
+    if (updateData.name && updateData.name !== oldName) {
+      try {
+        const oldS3Path = await generateS3FolderPath(folder._id, oldName, folder.parentFolderId);
+        const newS3Path = await generateS3FolderPath(folder._id, updateData.name, folder.parentFolderId);
+        
+        // Create new folder and copy contents
+        await createS3Folder(newS3Path);
+        
+        // Delete old folder
+        await deleteS3Folder(oldS3Path);
+        
+        console.log(`S3 folder renamed from ${oldS3Path} to ${newS3Path}`);
+      } catch (s3Error) {
+        console.error('Failed to rename S3 folder:', s3Error);
+        // Continue execution - don't fail the entire operation for S3 error
+      }
+    }
+    
+    const updatedFolder = await Folder.findOneAndUpdate(
       { _id: req.params.id, deletedAt: null },
       updateData,
       { new: true }
     ).populate('createdBy', 'name email');
 
-    if (!folder) {
-      return errorResponse(res, 'Folder not found', 404);
-    }
-    return successResponse(res, folder, 'Folder updated successfully');
+    return successResponse(res, updatedFolder, 'Folder updated successfully');
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
@@ -109,6 +183,16 @@ exports.deleteFolder = async (req, res) => {
     const folder = await Folder.findById(req.params.id);
     if (!folder) {
       return errorResponse(res, 'Folder not found', 404);
+    }
+
+    // Delete from S3 first
+    try {
+      const s3FolderPath = await generateS3FolderPath(folder._id, folder.name, folder.parentFolderId);
+      await deleteS3Folder(s3FolderPath);
+      console.log(`S3 folder deleted: ${s3FolderPath}`);
+    } catch (s3Error) {
+      console.error('Failed to delete S3 folder:', s3Error);
+      // Continue execution - don't fail the entire operation for S3 error
     }
 
     await Folder.updateMany(
