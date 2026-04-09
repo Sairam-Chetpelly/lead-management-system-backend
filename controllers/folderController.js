@@ -3,7 +3,7 @@ const Document = require('../models/Document');
 const DownloadLog = require('../models/DownloadLog');
 const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response');
-const { createS3Folder, deleteS3Folder, generateS3FolderPath } = require('../utils/s3Service');
+const { createS3Folder, deleteS3Folder, generateS3FolderPath, checkAndCreateFolder } = require('../utils/s3Service');
 const archiver = require('archiver');
 const path = require('path');
 const fs = require('fs');
@@ -45,13 +45,13 @@ exports.createFolder = async (req, res) => {
 
     await folder.save();
     
-    // Create corresponding folder in S3
+    // Create corresponding folder in S3 (inside documents prefix)
     try {
       const s3FolderPath = await generateS3FolderPath(folder._id, name.trim(), parentFolderId);
-      await createS3Folder(s3FolderPath);
-      console.log(`S3 folder created: ${s3FolderPath}`);
+      await checkAndCreateFolder(s3FolderPath);
+      console.log(`S3 folder created inside documents: ${s3FolderPath}`);
     } catch (s3Error) {
-      console.error('Failed to create S3 folder:', s3Error);
+      console.error('Failed to create S3 folder inside documents:', s3Error);
       // Continue execution - don't fail the entire operation for S3 error
     }
     
@@ -152,8 +152,8 @@ exports.updateFolder = async (req, res) => {
         const oldS3Path = await generateS3FolderPath(folder._id, oldName, folder.parentFolderId);
         const newS3Path = await generateS3FolderPath(folder._id, updateData.name, folder.parentFolderId);
         
-        // Create new folder and copy contents
-        await createS3Folder(newS3Path);
+        // Create new folder and copy contents (inside documents prefix)
+        await checkAndCreateFolder(newS3Path);
         
         // Delete old folder
         await deleteS3Folder(oldS3Path);
