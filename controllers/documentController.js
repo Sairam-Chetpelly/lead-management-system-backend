@@ -2,38 +2,14 @@ const Document = require('../models/Document');
 const Keyword = require('../models/Keyword');
 const DownloadLog = require('../models/DownloadLog');
 const User = require('../models/User');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const { addWatermark } = require('../utils/watermark');
+const { documentUpload, deleteS3File, getSignedUrl, uploadToS3 } = require('../utils/s3Service');
 const { successResponse, errorResponse } = require('../utils/response');
-
-// Configure multer for document uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, '../uploads/documents');
-    if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath, { recursive: true });
-    }
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 50 * 1024 * 1024 }
-});
-  
 
 // Upload document
 exports.uploadDocument = [
-  upload.single('file'),
+  documentUpload.single('file'),
   async (req, res) => {
-    console.log('=== UPLOAD START ===');
+    console.log('=== S3 UPLOAD START ===');
     console.log('1. Request received');
     console.log('2. Request body:', req.body);
     console.log('3. File info:', req.file ? { name: req.file.originalname, size: req.file.size, type: req.file.mimetype } : 'No file');
@@ -46,20 +22,24 @@ exports.uploadDocument = [
         console.log('5. ERROR: No file uploaded');
         return errorResponse(res, 'No file uploaded', 400);
       }
-      console.log('5. File validated successfully');
+      console.log('5. File received, uploading to S3...');
+
+      // Upload to S3
+      const s3Result = await uploadToS3(req.file, 'documents');
+      console.log('6. File uploaded to S3:', s3Result);
 
       // Process keywords
       let keywordIds = [];
       if (keywords) {
-        console.log('6. Processing keywords:', keywords);
+        console.log('7. Processing keywords:', keywords);
         const keywordArray = Array.isArray(keywords) ? keywords : keywords.split(',').map(k => k.trim());
-        console.log('7. Keyword array:', keywordArray);
+        console.log('8. Keyword array:', keywordArray);
         
         for (const keywordName of keywordArray) {
           if (keywordName) {
             let keyword = await Keyword.findOne({ name: keywordName.toLowerCase() });
             if (!keyword) {
-              console.log('8. Creating new keyword:', keywordName);
+              console.log('9. Creating new keyword:', keywordName);
               keyword = await Keyword.create({ name: keywordName.toLowerCase() });
             }
             keyword.usageCount += 1;
@@ -67,82 +47,41 @@ exports.uploadDocument = [
             keywordIds.push(keyword._id);
           }
         }
-        console.log('9. Keywords processed, IDs:', keywordIds);
+        console.log('10. Keywords processed, IDs:', keywordIds);
       } else {
-        console.log('6. No keywords to process');
+        console.log('7. No keywords to process');
       }
 
-      // Process images: convert to WebP and compress
-      let finalPath = req.file.path;
-      let finalMimeType = req.file.mimetype;
-      let finalFileName = req.file.originalname;
-      console.log('10. Initial file path:', finalPath);
-      
-      if (req.file.mimetype.startsWith('image/')) {
-        console.log('11. Image detected, converting to WebP');
-        const sharp = require('sharp');
-        const webpPath = finalPath.replace(path.extname(finalPath), '.webp');
-        
-        try {
-          await sharp(finalPath)
-            .webp({ quality: 80 })
-            .toFile(webpPath);
-          console.log('12. WebP conversion successful');
-          
-          fs.unlinkSync(finalPath);
-          finalPath = webpPath;
-          finalMimeType = 'image/webp';
-          finalFileName = req.file.originalname.replace(path.extname(req.file.originalname), '.webp');
-          console.log('13. Updated to WebP path:', finalPath);
-        } catch (error) {
-          console.error('12. Image conversion error:', error.message);
-        }
-      } else {
-        console.log('11. Not an image, skipping conversion');
-      }
-
-      // Add watermark
-      console.log('14. Adding watermark');
-      try {
-        finalPath = await addWatermark(finalPath, finalMimeType);
-        console.log('15. Watermark added successfully');
-      } catch (error) {
-        console.error('15. Watermark error:', error.message);
-      }
-
-      console.log('16. Creating document record');
+      console.log('11. Creating document record');
       const document = new Document({
         folderId: folderId || null,
-        fileName: finalFileName,
+        fileName: req.file.originalname,
         title,
         subtitle,
-        filePath: finalPath,
-        fileType: finalMimeType,
-        fileSize: fs.statSync(finalPath).size,
+        filePath: s3Result.location, // S3 URL
+        s3Key: s3Result.key, // S3 key for deletion
+        fileType: req.file.mimetype,
+        fileSize: req.file.size,
         uploadedBy: req.user.userId,
         category,
         description,
         keywords: keywordIds
       });
-      console.log('17. Document object created');
+      console.log('12. Document object created');
 
       await document.save();
-      console.log('18. Document saved to database');
+      console.log('13. Document saved to database');
       
       await document.populate(['uploadedBy', 'keywords', 'folderId']);
-      console.log('19. Document populated');
+      console.log('14. Document populated');
 
-      console.log('20. SUCCESS - Sending response');
-      console.log('=== UPLOAD END ===');
+      console.log('15. SUCCESS - Sending response');
+      console.log('=== S3 UPLOAD END ===');
       return successResponse(res, document, 'Document uploaded successfully', 201);
     } catch (error) {
       console.error('ERROR at step:', error.message);
       console.error('Full error:', error);
-      if (req.file && fs.existsSync(req.file.path)) {
-        console.log('Cleaning up uploaded file');
-        fs.unlinkSync(req.file.path);
-      }
-      console.log('=== UPLOAD FAILED ===');
+      console.log('=== S3 UPLOAD FAILED ===');
       return errorResponse(res, error.message, 500);
     }
   }
@@ -276,7 +215,9 @@ exports.downloadDocument = async (req, res) => {
       });
     }
 
-    res.download(document.filePath, document.fileName);
+    // Generate signed URL for S3 download
+    const downloadUrl = getSignedUrl(document.s3Key, 300); // 5 minutes expiry
+    res.redirect(downloadUrl);
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
@@ -290,13 +231,9 @@ exports.viewDocument = async (req, res) => {
       return errorResponse(res, 'Document not found', 404);
     }
     
-    if (!fs.existsSync(document.filePath)) {
-      return errorResponse(res, 'File not found on server', 404);
-    }
-    
-    res.setHeader('Content-Type', document.fileType);
-    res.setHeader('Content-Disposition', 'inline');
-    res.sendFile(path.resolve(document.filePath));
+    // Generate signed URL for S3 viewing
+    const viewUrl = getSignedUrl(document.s3Key, 300); // 5 minutes expiry
+    res.redirect(viewUrl);
   } catch (error) {
     console.error('View document error:', error);
     return errorResponse(res, error.message, 500);
@@ -309,6 +246,16 @@ exports.deleteDocument = async (req, res) => {
     const document = await Document.findById(req.params.id);
     if (!document) {
       return errorResponse(res, 'Document not found', 404);
+    }
+    
+    // Delete from S3
+    if (document.s3Key) {
+      try {
+        await deleteS3File(document.s3Key);
+      } catch (error) {
+        console.error('S3 deletion error:', error);
+        // Continue with soft delete even if S3 deletion fails
+      }
     }
     
     for (const keywordId of document.keywords) {

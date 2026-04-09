@@ -1,4 +1,5 @@
 const AWS = require('aws-sdk');
+const multer = require('multer');
 
 // Configure AWS
 AWS.config.update({
@@ -9,6 +10,50 @@ AWS.config.update({
 
 const s3 = new AWS.S3();
 const DOCUMENTS_PREFIX = 'documents/';
+
+// Custom S3 upload function
+const uploadToS3 = async (file, folder = 'documents') => {
+  const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+  const key = `${folder}/${uniqueSuffix}${require('path').extname(file.originalname)}`;
+  
+  const params = {
+    Bucket: process.env.AWS_S3_BUCKET_NAME,
+    Key: key,
+    Body: file.buffer,
+    ContentType: file.mimetype
+    // Removed ACL to avoid permission issues
+  };
+  
+  try {
+    const result = await s3.upload(params).promise();
+    return {
+      location: result.Location,
+      key: result.Key,
+      bucket: result.Bucket
+    };
+  } catch (error) {
+    console.error('S3 upload error:', error);
+    throw new Error(`S3 upload failed: ${error.message}`);
+  }
+};
+
+// Configure multer for memory storage
+const documentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }
+});
+
+const profileUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
+});
 
 // Validate and ensure folder is created inside documents prefix
 const validateAndFormatFolderPath = (folderPath) => {
@@ -120,10 +165,42 @@ const checkAndCreateFolder = async (folderPath) => {
   }
 };
 
+// Delete file from S3
+const deleteS3File = async (fileKey) => {
+  try {
+    const params = {
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: fileKey
+    };
+    await s3.deleteObject(params).promise();
+    console.log(`S3 file deleted: ${fileKey}`);
+    return { success: true };
+  } catch (error) {
+    console.error('S3 file deletion error:', error);
+    throw error;
+  }
+};
+
+// Get signed URL for file access
+const getSignedUrl = (fileKey, expires = 3600) => {
+  const params = {
+    Bucket: process.env.AWS_S3_BUCKET_NAME,
+    Key: fileKey,
+    Expires: expires
+  };
+  return s3.getSignedUrl('getObject', params);
+};
+
 module.exports = {
   createS3Folder,
   deleteS3Folder,
   generateS3FolderPath,
   checkAndCreateFolder,
-  validateAndFormatFolderPath
+  validateAndFormatFolderPath,
+  documentUpload,
+  profileUpload,
+  deleteS3File,
+  getSignedUrl,
+  uploadToS3,
+  s3
 };

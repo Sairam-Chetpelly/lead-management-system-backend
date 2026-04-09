@@ -4,8 +4,7 @@ const Lead = require('../models/Lead');
 const { successResponse, errorResponse } = require('../utils/response');
 const { validationResult } = require('express-validator');
 const Centre = require('../models/Centre');
-const path = require('path');
-const fs = require('fs');
+const { profileUpload, deleteS3File, getSignedUrl, uploadToS3 } = require('../utils/s3Service');
 
 // Get all users with pagination and filtering
 exports.getAll = async (req, res) => {
@@ -291,41 +290,58 @@ exports.delete = async (req, res) => {
 };
 
 // Upload profile image
-exports.uploadProfileImage = async (req, res) => {
-  try {
-    if (!req.file) {
-      return errorResponse(res, 'No image file provided', 400);
-    }
-
-    const user = await User.findById(req.params.id);
-    if (!user) {
-      return errorResponse(res, 'User not found', 404);
-    }
-
-    if (user.profileImage) {
-      const oldImagePath = path.join(__dirname, '../uploads/profiles', user.profileImage);
-      if (fs.existsSync(oldImagePath)) {
-        fs.unlinkSync(oldImagePath);
+exports.uploadProfileImage = [
+  profileUpload.single('profileImage'),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return errorResponse(res, 'No image file provided', 400);
       }
+
+      const user = await User.findById(req.params.id);
+      if (!user) {
+        return errorResponse(res, 'User not found', 404);
+      }
+
+      // Delete old profile image from S3 if exists
+      if (user.profileImageS3Key) {
+        try {
+          await deleteS3File(user.profileImageS3Key);
+        } catch (error) {
+          console.error('Error deleting old profile image:', error);
+        }
+      }
+
+      // Upload new image to S3
+      const s3Result = await uploadToS3(req.file, 'profiles');
+
+      user.profileImage = s3Result.location; // S3 URL
+      user.profileImageS3Key = s3Result.key; // S3 key for deletion
+      await user.save();
+
+      return successResponse(res, { 
+        profileImage: s3Result.location,
+        profileImageS3Key: s3Result.key 
+      }, 'Profile image uploaded successfully', 200);
+    } catch (error) {
+      return errorResponse(res, error.message, 500);
     }
-
-    user.profileImage = req.file.filename;
-    await user.save();
-
-    return successResponse(res, { profileImage: req.file.filename }, 'Profile image uploaded successfully', 200);
-  } catch (error) {
-    return errorResponse(res, error.message, 500);
   }
-};
+];
 
 // Serve profile image
-exports.getProfileImage = (req, res) => {
-  const imagePath = path.join(__dirname, '../uploads/profiles', req.params.filename);
-
-  if (fs.existsSync(imagePath)) {
-    res.sendFile(imagePath);
-  } else {
-    return errorResponse(res, 'Image not found', 404);
+exports.getProfileImage = async (req, res) => {
+  try {
+    const user = await User.findOne({ profileImageS3Key: req.params.filename });
+    if (!user || !user.profileImageS3Key) {
+      return errorResponse(res, 'Image not found', 404);
+    }
+    
+    // Generate signed URL and redirect
+    const imageUrl = getSignedUrl(user.profileImageS3Key, 300); // 5 minutes expiry
+    res.redirect(imageUrl);
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
   }
 };
 

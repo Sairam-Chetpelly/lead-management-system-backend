@@ -86,6 +86,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  profileImageS3Key: {
+    type: String,
+    default: null
+  },
   resetPasswordToken: {
     type: String,
     default: null
