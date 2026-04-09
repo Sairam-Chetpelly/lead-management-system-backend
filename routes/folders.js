@@ -28,6 +28,7 @@ router.post('/sync-to-s3', async (req, res) => {
 router.post('/', folderController.createFolder);
 router.get('/all', folderController.getAllFolders);
 router.get('/', folderController.getFolders);
+router.get('/:id/path', folderController.getFolderPath);
 router.post('/multi-download', folderController.multiDownload);
 router.get('/:id/download', folderController.downloadFolder);
 router.get('/:id', folderController.getFolderContents);

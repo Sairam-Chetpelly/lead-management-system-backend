@@ -60,14 +60,19 @@ const generateS3FolderPath = async (folderId, folderName, parentFolderId = null)
   const Folder = require('../models/Folder');
   
   if (!parentFolderId) {
-    return folderName;
+    return `documents/${folderName}`;
   }
   
   // Build path by traversing up the folder hierarchy
   const buildPath = async (currentFolderId) => {
     const folder = await Folder.findById(currentFolderId);
-    if (!folder || !folder.parentFolderId) {
-      return folder ? folder.name : '';
+    if (!folder) {
+      return '';
+    }
+    
+    // If no parent, this is a root-level folder
+    if (!folder.parentFolderId) {
+      return folder.name;
     }
     
     const parentPath = await buildPath(folder.parentFolderId);
@@ -75,7 +80,7 @@ const generateS3FolderPath = async (folderId, folderName, parentFolderId = null)
   };
   
   const parentPath = await buildPath(parentFolderId);
-  return parentPath ? `${parentPath}/${folderName}` : folderName;
+  return `documents/${parentPath}/${folderName}`;
 };
 
 module.exports = {

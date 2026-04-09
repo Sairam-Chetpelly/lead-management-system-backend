@@ -91,6 +91,39 @@ exports.getAllFolders = async (req, res) => {
   }
 };
 
+// Get folder path for S3 uploads
+exports.getFolderPath = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const folder = await Folder.findOne({ _id: id, deletedAt: null });
+    
+    if (!folder) {
+      return errorResponse(res, 'Folder not found', 404);
+    }
+
+    // Build path by traversing up the folder hierarchy
+    const buildPath = async (currentFolderId) => {
+      const currentFolder = await Folder.findById(currentFolderId);
+      if (!currentFolder) {
+        return '';
+      }
+      
+      // If no parent, this is a root-level folder
+      if (!currentFolder.parentFolderId) {
+        return currentFolder.name;
+      }
+      
+      const parentPath = await buildPath(currentFolder.parentFolderId);
+      return parentPath ? `${parentPath}/${currentFolder.name}` : currentFolder.name;
+    };
+    
+    const path = await buildPath(id);
+    return successResponse(res, { path }, 'Folder path retrieved successfully');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
 // Get folder with contents
 exports.getFolderContents = async (req, res) => {
   try {

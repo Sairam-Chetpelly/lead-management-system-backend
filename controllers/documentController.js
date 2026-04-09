@@ -7,6 +7,14 @@ const path = require('path');
 const fs = require('fs');
 const { addWatermark } = require('../utils/watermark');
 const { successResponse, errorResponse } = require('../utils/response');
+const { 
+  uploadFileToS3, 
+  uploadProcessedFileToS3, 
+  deleteFileFromS3, 
+  generatePresignedUrl, 
+  getS3FileStream, 
+  generateDocumentS3Path 
+} = require('../utils/s3DocumentService');
 
 // Configure multer for document uploads
 const storage = multer.diskStorage({
@@ -29,122 +37,71 @@ const upload = multer({
 });
   
 
-// Upload document
+// Create document record (for frontend S3 uploads)
+exports.createDocument = async (req, res) => {
+  try {
+    const { folderId, fileName, title, subtitle, s3Key, fileType, fileSize, category, keywords } = req.body;
+    
+    console.log('Creating document record:', { fileName, s3Key, fileType, category });
+
+    // Validate file type and size
+    if (!fileName || !s3Key || !fileType) {
+      return errorResponse(res, 'Missing required file information', 400);
+    }
+
+    // Check file size limit (50MB)
+    if (fileSize > 50 * 1024 * 1024) {
+      return errorResponse(res, 'File size exceeds 50MB limit', 400);
+    }
+
+    // Process keywords
+    let keywordIds = [];
+    if (keywords && keywords.length > 0) {
+      for (const keywordName of keywords) {
+        if (keywordName) {
+          let keyword = await Keyword.findOne({ name: keywordName.toLowerCase() });
+          if (!keyword) {
+            keyword = await Keyword.create({ name: keywordName.toLowerCase() });
+          }
+          keyword.usageCount += 1;
+          await keyword.save();
+          keywordIds.push(keyword._id);
+        }
+      }
+    }
+
+    const document = new Document({
+      folderId: folderId || null,
+      fileName,
+      title: title || fileName.split('.')[0], // Use filename as title if not provided
+      subtitle,
+      filePath: s3Key, // Store S3 key as filePath
+      fileType,
+      fileSize,
+      uploadedBy: req.user.userId,
+      category: category || 'other',
+      keywords: keywordIds
+    });
+
+    await document.save();
+    await document.populate(['uploadedBy', 'keywords', 'folderId']);
+
+    // Add file metadata to response
+    const documentObj = document.toObject();
+    documentObj.fileMetadata = getFileMetadata(document.fileName, document.fileType);
+
+    return successResponse(res, documentObj, 'Document created successfully', 201);
+  } catch (error) {
+    console.error('Create document error:', error);
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// Upload document (legacy - kept for backward compatibility)
 exports.uploadDocument = [
   upload.single('file'),
   async (req, res) => {
-    console.log('=== UPLOAD START ===');
-    console.log('1. Request received');
-    console.log('2. Request body:', req.body);
-    console.log('3. File info:', req.file ? { name: req.file.originalname, size: req.file.size, type: req.file.mimetype } : 'No file');
-    
-    try {
-      const { category, description, folderId, keywords, title, subtitle } = req.body;
-      console.log('4. Extracted body data:', { category, folderId, keywords, title, subtitle });
-
-      if (!req.file) {
-        console.log('5. ERROR: No file uploaded');
-        return errorResponse(res, 'No file uploaded', 400);
-      }
-      console.log('5. File validated successfully');
-
-      // Process keywords
-      let keywordIds = [];
-      if (keywords) {
-        console.log('6. Processing keywords:', keywords);
-        const keywordArray = Array.isArray(keywords) ? keywords : keywords.split(',').map(k => k.trim());
-        console.log('7. Keyword array:', keywordArray);
-        
-        for (const keywordName of keywordArray) {
-          if (keywordName) {
-            let keyword = await Keyword.findOne({ name: keywordName.toLowerCase() });
-            if (!keyword) {
-              console.log('8. Creating new keyword:', keywordName);
-              keyword = await Keyword.create({ name: keywordName.toLowerCase() });
-            }
-            keyword.usageCount += 1;
-            await keyword.save();
-            keywordIds.push(keyword._id);
-          }
-        }
-        console.log('9. Keywords processed, IDs:', keywordIds);
-      } else {
-        console.log('6. No keywords to process');
-      }
-
-      // Process images: convert to WebP and compress
-      let finalPath = req.file.path;
-      let finalMimeType = req.file.mimetype;
-      let finalFileName = req.file.originalname;
-      console.log('10. Initial file path:', finalPath);
-      
-      if (req.file.mimetype.startsWith('image/')) {
-        console.log('11. Image detected, converting to WebP');
-        const sharp = require('sharp');
-        const webpPath = finalPath.replace(path.extname(finalPath), '.webp');
-        
-        try {
-          await sharp(finalPath)
-            .webp({ quality: 80 })
-            .toFile(webpPath);
-          console.log('12. WebP conversion successful');
-          
-          fs.unlinkSync(finalPath);
-          finalPath = webpPath;
-          finalMimeType = 'image/webp';
-          finalFileName = req.file.originalname.replace(path.extname(req.file.originalname), '.webp');
-          console.log('13. Updated to WebP path:', finalPath);
-        } catch (error) {
-          console.error('12. Image conversion error:', error.message);
-        }
-      } else {
-        console.log('11. Not an image, skipping conversion');
-      }
-
-      // Add watermark
-      console.log('14. Adding watermark');
-      try {
-        finalPath = await addWatermark(finalPath, finalMimeType);
-        console.log('15. Watermark added successfully');
-      } catch (error) {
-        console.error('15. Watermark error:', error.message);
-      }
-
-      console.log('16. Creating document record');
-      const document = new Document({
-        folderId: folderId || null,
-        fileName: finalFileName,
-        title,
-        subtitle,
-        filePath: finalPath,
-        fileType: finalMimeType,
-        fileSize: fs.statSync(finalPath).size,
-        uploadedBy: req.user.userId,
-        category,
-        description,
-        keywords: keywordIds
-      });
-      console.log('17. Document object created');
-
-      await document.save();
-      console.log('18. Document saved to database');
-      
-      await document.populate(['uploadedBy', 'keywords', 'folderId']);
-      console.log('19. Document populated');
-
-      console.log('20. SUCCESS - Sending response');
-      console.log('=== UPLOAD END ===');
-      return successResponse(res, document, 'Document uploaded successfully', 201);
-    } catch (error) {
-      console.error('ERROR at step:', error.message);
-      console.error('Full error:', error);
-      if (req.file && fs.existsSync(req.file.path)) {
-        console.log('Cleaning up uploaded file');
-        fs.unlinkSync(req.file.path);
-      }
-      console.log('=== UPLOAD FAILED ===');
-      return errorResponse(res, error.message, 500);
-    }
+    return errorResponse(res, 'Please use direct S3 upload from frontend', 400);
   }
 ];
 
@@ -216,10 +173,94 @@ exports.getDocuments = async (req, res) => {
       .populate('keywords')
       .populate('folderId', 'name')
       .sort({ createdAt: -1 });
-    return successResponse(res, { documents }, 'Documents retrieved successfully');
+    
+    // Add file type metadata for better frontend handling
+    const documentsWithMetadata = documents.map(doc => {
+      const docObj = doc.toObject();
+      docObj.fileMetadata = getFileMetadata(doc.fileName, doc.fileType);
+      return docObj;
+    });
+    
+    return successResponse(res, { documents: documentsWithMetadata }, 'Documents retrieved successfully');
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
+};
+
+// Helper function to get file metadata
+const getFileMetadata = (fileName, fileType) => {
+  const extension = fileName.split('.').pop()?.toLowerCase() || '';
+  
+  const metadata = {
+    extension,
+    category: 'other',
+    previewable: false,
+    icon: 'file'
+  };
+  
+  // Text files
+  if (['txt', 'rtf', 'log'].includes(extension) || fileType.includes('text/plain')) {
+    metadata.category = 'text';
+    metadata.previewable = true;
+    metadata.icon = 'file-text';
+  }
+  // CSV files
+  else if (['csv', 'tsv'].includes(extension) || fileType.includes('text/csv')) {
+    metadata.category = 'spreadsheet';
+    metadata.previewable = true;
+    metadata.icon = 'file-spreadsheet';
+  }
+  // Excel files
+  else if (['xlsx', 'xls', 'xlsm', 'xlsb', 'xltx', 'xltm', 'xlt'].includes(extension) || 
+           fileType.includes('spreadsheet') || fileType.includes('excel')) {
+    metadata.category = 'spreadsheet';
+    metadata.previewable = true;
+    metadata.icon = 'file-spreadsheet';
+  }
+  // Word documents
+  else if (['docx', 'doc', 'docm', 'dotx', 'dotm', 'dot', 'odt'].includes(extension) ||
+           fileType.includes('word') || fileType.includes('document') || 
+           fileType.includes('wordprocessingml')) {
+    metadata.category = 'document';
+    metadata.previewable = true;
+    metadata.icon = 'file-text';
+  }
+  // PDF files
+  else if (extension === 'pdf' || fileType.includes('pdf')) {
+    metadata.category = 'pdf';
+    metadata.previewable = true;
+    metadata.icon = 'file-text';
+  }
+  // PowerPoint files
+  else if (['ppt', 'pptx', 'pps', 'ppsx', 'potx', 'potm', 'pptm'].includes(extension) ||
+           fileType.includes('presentation') || fileType.includes('powerpoint')) {
+    metadata.category = 'presentation';
+    metadata.previewable = true;
+    metadata.icon = 'presentation';
+  }
+  // Image files
+  else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'tiff', 'ico'].includes(extension) ||
+           fileType.startsWith('image/')) {
+    metadata.category = 'image';
+    metadata.previewable = true;
+    metadata.icon = 'image';
+  }
+  // Video files
+  else if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv', 'm4v', '3gp'].includes(extension) ||
+           fileType.startsWith('video/')) {
+    metadata.category = 'video';
+    metadata.previewable = true;
+    metadata.icon = 'video';
+  }
+  // Audio files
+  else if (['mp3', 'wav', 'ogg', 'aac', 'flac', 'wma', 'm4a'].includes(extension) ||
+           fileType.startsWith('audio/')) {
+    metadata.category = 'audio';
+    metadata.previewable = true;
+    metadata.icon = 'music';
+  }
+  
+  return metadata;
 };
 
 // Get single document
@@ -227,11 +268,17 @@ exports.getDocument = async (req, res) => {
   try {
     const document = await Document.findOne({ _id: req.params.id, deletedAt: null })
       .populate('uploadedBy', 'name email')
-      .populate('keywords');
+      .populate('keywords')
+      .populate('folderId', 'name');
     if (!document) {
       return errorResponse(res, 'Document not found', 404);
     }
-    return successResponse(res, document, 'Document retrieved successfully');
+    
+    // Add file metadata
+    const documentObj = document.toObject();
+    documentObj.fileMetadata = getFileMetadata(document.fileName, document.fileType);
+    
+    return successResponse(res, documentObj, 'Document retrieved successfully');
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
@@ -276,7 +323,18 @@ exports.downloadDocument = async (req, res) => {
       });
     }
 
-    res.download(document.filePath, document.fileName);
+    // Get file from S3
+    try {
+      const fileStream = await getS3FileStream(document.filePath);
+      
+      res.setHeader('Content-Type', document.fileType);
+      res.setHeader('Content-Disposition', `attachment; filename="${document.fileName}"`);
+      
+      fileStream.pipe(res);
+    } catch (s3Error) {
+      console.error('S3 download error:', s3Error);
+      return errorResponse(res, 'File not found or unable to download', 404);
+    }
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
@@ -290,17 +348,58 @@ exports.viewDocument = async (req, res) => {
       return errorResponse(res, 'Document not found', 404);
     }
     
-    if (!fs.existsSync(document.filePath)) {
+    try {
+      const fileStream = await getS3FileStream(document.filePath);
+      
+      // Set appropriate headers based on file type
+      const contentType = getContentType(document.fileName, document.fileType);
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', 'inline');
+      
+      // Add CORS headers for better browser compatibility
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      
+      fileStream.pipe(res);
+    } catch (s3Error) {
+      console.error('S3 view error:', s3Error);
       return errorResponse(res, 'File not found on server', 404);
     }
-    
-    res.setHeader('Content-Type', document.fileType);
-    res.setHeader('Content-Disposition', 'inline');
-    res.sendFile(path.resolve(document.filePath));
   } catch (error) {
     console.error('View document error:', error);
     return errorResponse(res, error.message, 500);
   }
+};
+
+// Helper function to get proper content type
+const getContentType = (fileName, originalFileType) => {
+  const extension = fileName.split('.').pop()?.toLowerCase() || '';
+  
+  // Override content types for better browser handling
+  const contentTypeMap = {
+    'pdf': 'application/pdf',
+    'txt': 'text/plain; charset=utf-8',
+    'csv': 'text/csv; charset=utf-8',
+    'json': 'application/json; charset=utf-8',
+    'xml': 'application/xml; charset=utf-8',
+    'html': 'text/html; charset=utf-8',
+    'css': 'text/css; charset=utf-8',
+    'js': 'application/javascript; charset=utf-8',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'svg': 'image/svg+xml',
+    'webp': 'image/webp',
+    'mp4': 'video/mp4',
+    'webm': 'video/webm',
+    'mp3': 'audio/mpeg',
+    'wav': 'audio/wav',
+    'ogg': 'audio/ogg'
+  };
+  
+  return contentTypeMap[extension] || originalFileType || 'application/octet-stream';
 };
 
 // Delete document (soft delete)
@@ -311,6 +410,16 @@ exports.deleteDocument = async (req, res) => {
       return errorResponse(res, 'Document not found', 404);
     }
     
+    // Delete from S3
+    try {
+      await deleteFileFromS3(document.filePath);
+      console.log(`S3 file deleted: ${document.filePath}`);
+    } catch (s3Error) {
+      console.error('Failed to delete S3 file:', s3Error);
+      // Continue with soft delete even if S3 deletion fails
+    }
+    
+    // Update keyword usage counts
     for (const keywordId of document.keywords) {
       const keyword = await Keyword.findById(keywordId);
       if (keyword) {
@@ -323,6 +432,30 @@ exports.deleteDocument = async (req, res) => {
     await document.save();
     return successResponse(res, null, 'Document deleted successfully');
   } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// Get presigned URL for file access
+exports.getFileUrl = async (req, res) => {
+  try {
+    const document = await Document.findOne({ _id: req.params.id, deletedAt: null });
+    if (!document) {
+      return errorResponse(res, 'Document not found', 404);
+    }
+
+    // Generate presigned URL (valid for 1 hour)
+    const presignedUrl = await generatePresignedUrl(document.filePath, 3600);
+    
+    return successResponse(res, { 
+      url: presignedUrl,
+      fileName: document.fileName,
+      fileType: document.fileType,
+      fileSize: document.fileSize,
+      fileMetadata: getFileMetadata(document.fileName, document.fileType)
+    }, 'File URL generated successfully');
+  } catch (error) {
+    console.error('Get file URL error:', error);
     return errorResponse(res, error.message, 500);
   }
 };
