@@ -20,6 +20,10 @@ const documentSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  s3Key: {
+    type: String,
+    default: null
+  },
   fileType: {
     type: String,
     required: true

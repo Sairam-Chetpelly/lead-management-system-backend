@@ -10,7 +10,12 @@ router.get('/:id/view', authenticateTokenFlexible, documentController.viewDocume
 // All other routes require standard authentication
 router.use(authenticateToken);
 
-// Upload document
+// S3 Upload routes
+router.post('/s3/initialize', documentController.initializeS3Upload);
+router.post('/s3/complete', documentController.completeS3Upload);
+router.post('/s3/abort', documentController.abortS3Upload);
+
+// Upload document (legacy - for small files)
 router.post('/upload', documentController.uploadDocument);
 
 // Get documents
