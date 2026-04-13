@@ -26,6 +26,8 @@ const documentRoutes = require('./routes/documents');
 const folderRoutes = require('./routes/folders');
 const keywordRoutes = require('./routes/keywords');
 const categoryRoutes = require('./routes/categories');
+const fileUploadRoutes = require('./routes/fileUpload');
+const presignedUrlRoutes = require('./routes/presignedUrl');
 
 const app = express();
 
@@ -102,6 +104,8 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/folders', folderRoutes);
 app.use('/api/keywords', keywordRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/files', fileUploadRoutes);
+app.use('/api/presigned', presignedUrlRoutes);
 
 
 // For Vercel deployment

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S3 File Upload Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .upload-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        .file-input { margin: 10px 0; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    </style>
+</head>
+<body>
+    <h1>S3 File Upload Test</h1>
+    
+    <div class="upload-section">
+        <h3>Authentication</h3>
+        <input type="text" id="token" placeholder="Enter JWT token" style="width: 100%; padding: 8px;">
+        <button onclick="testAuth()">Test Auth</button>
+        <div id="auth-result"></div>
+    </div>
+
+    <div class="upload-section">
+        <h3>Single File Upload</h3>
+        <div class="file-input">
+            <input type="file" id="singleFile">
+        </div>
+        <div>
+            <label>Folder: <input type="text" id="singleFolder" value="documents" placeholder="documents"></label>
+        </div>
+        <div>
+            <label><input type="checkbox" id="singleWatermark" checked> Apply Watermark</label>
+        </div>
+        <button onclick="uploadSingle()">Upload Single File</button>
+        <div id="single-result"></div>
+    </div>
+
+    <div class="upload-section">
+        <h3>Multiple Files Upload</h3>
+        <div class="file-input">
+            <input type="file" id="multipleFiles" multiple>
+        </div>
+        <div>
+            <label>Folder: <input type="text" id="multipleFolder" value="documents" placeholder="documents"></label>
+        </div>
+        <div>
+            <label><input type="checkbox" id="multipleWatermark" checked> Apply Watermark</label>
+        </div>
+        <button onclick="uploadMultiple()">Upload Multiple Files</button>
+        <div id="multiple-result"></div>
+    </div>
+
+    <div class="upload-section">
+        <h3>File Management</h3>
+        <div>
+            <input type="text" id="fileKey" placeholder="Enter S3 file key" style="width: 70%;">
+            <button onclick="getFileUrl()">Get URL</button>
+            <button onclick="deleteFile()">Delete</button>
+        </div>
+        <div id="management-result"></div>
+    </div>
+
+    <div class="upload-section">
+        <h3>Allowed File Types</h3>
+        <button onclick="getAllowedTypes()">Get Allowed Types</button>
+        <div id="types-result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+        
+        function getToken() {
+            return document.getElementById('token').value;
+        }
+        
+        function showResult(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="result ${type}">${message}</div>`;
+        }
+        
+        async function testAuth() {
+            try {
+                const response = await fetch(`${API_BASE}/files/allowed-types`, {
+                    headers: {
+                        'Authorization': `Bearer ${getToken()}`
+                    }
+                });
+                
+                if (response.ok) {
+                    showResult('auth-result', 'Authentication successful!', 'success');
+                } else {
+                    showResult('auth-result', 'Authentication failed!', 'error');
+                }
+            } catch (error) {
+                showResult('auth-result', `Error: ${error.message}`, 'error');
+            }
+        }
+        
+        async function uploadSingle() {
+            const fileInput = document.getElementById('singleFile');
+            const folder = document.getElementById('singleFolder').value;
+            const watermark = document.getElementById('singleWatermark').checked;
+            
+            if (!fileInput.files[0]) {
+                showResult('single-result', 'Please select a file', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('folder', folder);
+            formData.append('watermark', watermark.toString());
+            
+            try {
+                const response = await fetch(`${API_BASE}/files/upload`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${getToken()}`
+                    },
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('single-result', `
+                        <strong>Upload successful!</strong><br>
+                        Key: ${result.data.key}<br>
+                        Size: ${result.data.size} bytes<br>
+                        Watermarked: ${result.data.watermarked}
+                    `, 'success');
+                } else {
+                    showResult('single-result', `Error: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showResult('single-result', `Error: ${error.message}`, 'error');
+            }
+        }
+        
+        async function uploadMultiple() {
+            const fileInput = document.getElementById('multipleFiles');
+            const folder = document.getElementById('multipleFolder').value;
+            const watermark = document.getElementById('multipleWatermark').checked;
+            
+            if (!fileInput.files.length) {
+                showResult('multiple-result', 'Please select files', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            Array.from(fileInput.files).forEach(file => {
+                formData.append('files', file);
+            });
+            formData.append('folder', folder);
+            formData.append('watermark', watermark.toString());
+            
+            try {
+                const response = await fetch(`${API_BASE}/files/upload-multiple`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${getToken()}`
+                    },
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('multiple-result', `
+                        <strong>Upload completed!</strong><br>
+                        Total: ${result.data.totalFiles}<br>
+                        Success: ${result.data.successCount}<br>
+                        Errors: ${result.data.errorCount}
+                    `, result.data.errorCount > 0 ? 'info' : 'success');
+                } else {
+                    showResult('multiple-result', `Error: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showResult('multiple-result', `Error: ${error.message}`, 'error');
+            }
+        }
+        
+        async function getFileUrl() {
+            const key = document.getElementById('fileKey').value;
+            
+            if (!key) {
+                showResult('management-result', 'Please enter a file key', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/files/url/${encodeURIComponent(key)}`, {
+                    headers: {
+                        'Authorization': `Bearer ${getToken()}`
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('management-result', `
+                        <strong>Signed URL generated!</strong><br>
+                        <a href="${result.data.url}" target="_blank">Download File</a><br>
+                        Expires in: ${result.data.expiresIn} seconds
+                    `, 'success');
+                } else {
+                    showResult('management-result', `Error: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showResult('management-result', `Error: ${error.message}`, 'error');
+            }
+        }
+        
+        async function deleteFile() {
+            const key = document.getElementById('fileKey').value;
+            
+            if (!key) {
+                showResult('management-result', 'Please enter a file key', 'error');
+                return;
+            }
+            
+            if (!confirm('Are you sure you want to delete this file?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/files/${encodeURIComponent(key)}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${getToken()}`
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('management-result', 'File deleted successfully!', 'success');
+                } else {
+                    showResult('management-result', `Error: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showResult('management-result', `Error: ${error.message}`, 'error');
+            }
+        }
+        
+        async function getAllowedTypes() {
+            try {
+                const response = await fetch(`${API_BASE}/files/allowed-types`);
+                const result = await response.json();
+                
+                if (response.ok) {
+                    const types = JSON.stringify(result.data, null, 2);
+                    showResult('types-result', `<pre>${types}</pre>`, 'success');
+                } else {
+                    showResult('types-result', `Error: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showResult('types-result', `Error: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

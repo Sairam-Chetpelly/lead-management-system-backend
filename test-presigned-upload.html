@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pre-signed URL Upload Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; }
+        .upload-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        .file-input { margin: 10px 0; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        .result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .progress-bar { width: 100%; height: 20px; background: #f0f0f0; border-radius: 10px; overflow: hidden; margin: 10px 0; }
+        .progress-fill { height: 100%; background: #007bff; transition: width 0.3s ease; }
+        .file-list { max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin: 10px 0; }
+        .file-item { padding: 5px; border-bottom: 1px solid #eee; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>Pre-signed URL Upload Test</h1>
+    <p><strong>Best Practice:</strong> Direct S3 uploads using pre-signed URLs - No AWS credentials exposed, faster uploads, scalable!</p>
+    
+    <div class="upload-section">
+        <h3>Authentication</h3>
+        <input type="text" id="token" placeholder="Enter JWT token" style="width: 70%; padding: 8px;">
+        <button onclick="testAuth()">Test Auth</button>
+        <div id="auth-result"></div>
+    </div>
+
+    <div class="upload-section">
+        <h3>Single File Upload (Pre-signed URL)</h3>
+        <div class="file-input">
+            <input type="file" id="singleFile">
+        </div>
+        <div>
+            <label>Folder: <input type="text" id="singleFolder" value="documents" placeholder="documents"></label>
+        </div>
+        <button onclick="uploadSingleFile()" id="singleUploadBtn">Upload File</button>
+        <div class="progress-bar" id="singleProgress" style="display: none;">
+            <div class="progress-fill" id="singleProgressFill" style="width: 0%;"></div>
+        </div>
+        <div id="single-result"></div>
+    </div>
+
+    <div class="upload-section">
+        <h3>Multiple Files Upload (Batch Pre-signed URLs)</h3>
+        <div class="file-input">
+            <input type="file" id="multipleFiles" multiple>
+        </div>
+        <div>
+            <label>Folder: <input type="text" id="multipleFolder" value="documents" placeholder="documents"></label>
+        </div>
+        <button onclick="uploadMultipleFiles()" id="multipleUploadBtn">Upload All Files</button>
+        <div class="progress-bar" id="multipleProgress" style="display: none;">
+            <div class="progress-fill" id="multipleProgressFill" style="width: 0%;"></div>
+        </div>
+        <div class="file-list" id="fileList" style="display: none;"></div>
+        <div id="multiple-result"></div>
+    </div>
+
+    <div class="upload-section">
+        <h3>File Management</h3>
+        <div>
+            <input type="text" id="fileKey" placeholder="Enter S3 file key (e.g., documents/123_file.pdf)" style="width: 60%; padding: 8px;">
+            <button onclick="getDownloadUrl()">Get Download URL</button>
+            <button onclick="verifyFile()">Verify File</button>
+            <button onclick="deleteFile()">Delete File</button>
+        </div>
+        <div id="management-result"></div>
+    </div>
+
+    <div class="upload-section">
+        <h3>File Type Information</h3>
+        <button onclick="getAllowedTypes()">Get Allowed Types & Limits</button>
+        <div id="types-result"></div>
+    </div>
+
+    <script src="examples/frontend-upload-service.js"></script>
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+        let uploadService;
+        
+        function getToken() {
+            return document.getElementById('token').value;
+        }
+        
+        function initUploadService() {
+            uploadService = new S3UploadService(API_BASE, getToken);
+        }
+        
+        function showResult(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="result ${type}">${message}</div>`;
+        }
+        
+        function showProgress(progressId, fillId, percent) {
+            const progressBar = document.getElementById(progressId);
+            const progressFill = document.getElementById(fillId);
+            
+            if (percent > 0) {
+                progressBar.style.display = 'block';
+                progressFill.style.width = percent + '%';
+            } else {
+                progressBar.style.display = 'none';
+            }
+        }
+        
+        async function testAuth() {
+            try {
+                initUploadService();
+                const types = await uploadService.getAllowedTypes();
+                showResult('auth-result', 'Authentication successful! ✅', 'success');
+            } catch (error) {
+                showResult('auth-result', `Authentication failed: ${error.message}`, 'error');
+            }
+        }
+        
+        async function uploadSingleFile() {
+            const fileInput = document.getElementById('singleFile');
+            const folder = document.getElementById('singleFolder').value;
+            const uploadBtn = document.getElementById('singleUploadBtn');
+            
+            if (!fileInput.files[0]) {
+                showResult('single-result', 'Please select a file', 'error');
+                return;
+            }
+            
+            initUploadService();
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Uploading...';
+            
+            try {
+                const result = await uploadService.uploadFile(fileInput.files[0], folder, (progress) => {
+                    showProgress('singleProgress', 'singleProgressFill', progress);
+                });
+                
+                showResult('single-result', `
+                    <strong>✅ Upload Successful!</strong><br>
+                    <strong>Key:</strong> ${result.key}<br>
+                    <strong>Size:</strong> ${(result.size / 1024).toFixed(2)} KB<br>
+                    <strong>Type:</strong> ${result.contentType}<br>
+                    <strong>Category:</strong> ${result.category}<br>
+                    <strong>Uploaded:</strong> ${new Date(result.uploadedAt).toLocaleString()}
+                `, 'success');
+                
+                // Auto-fill the file key for management operations
+                document.getElementById('fileKey').value = result.key;
+                
+            } catch (error) {
+                showResult('single-result', `❌ Upload Failed: ${error.message}`, 'error');
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload File';
+                showProgress('singleProgress', 'singleProgressFill', 0);
+            }
+        }
+        
+        async function uploadMultipleFiles() {
+            const fileInput = document.getElementById('multipleFiles');
+            const folder = document.getElementById('multipleFolder').value;
+            const uploadBtn = document.getElementById('multipleUploadBtn');
+            const fileList = document.getElementById('fileList');
+            
+            if (!fileInput.files.length) {
+                showResult('multiple-result', 'Please select files', 'error');
+                return;
+            }
+            
+            initUploadService();
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Uploading...';
+            fileList.style.display = 'block';
+            fileList.innerHTML = '';
+            
+            // Create file status list
+            Array.from(fileInput.files).forEach((file, index) => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                fileItem.id = `file-${index}`;
+                fileItem.innerHTML = `📄 ${file.name} - <span class="status">Waiting...</span>`;
+                fileList.appendChild(fileItem);
+            });
+            
+            try {
+                const result = await uploadService.uploadMultipleFiles(fileInput.files, folder, (fileIndex, progress, fileName) => {
+                    const fileItem = document.getElementById(`file-${fileIndex}`);
+                    if (fileItem) {
+                        const status = fileItem.querySelector('.status');
+                        status.textContent = `${Math.round(progress)}%`;
+                        status.style.color = progress === 100 ? 'green' : 'blue';
+                    }
+                    
+                    // Update overall progress
+                    const files = Array.from(fileInput.files);
+                    const totalProgress = files.reduce((sum, _, index) => {
+                        const item = document.getElementById(`file-${index}`);
+                        if (item) {
+                            const statusText = item.querySelector('.status').textContent;
+                            const percent = statusText.includes('%') ? parseInt(statusText) : 0;
+                            return sum + percent;
+                        }
+                        return sum;
+                    }, 0) / files.length;
+                    
+                    showProgress('multipleProgress', 'multipleProgressFill', totalProgress);
+                });
+                
+                // Update final status
+                result.uploaded.forEach((file, index) => {
+                    const fileItem = Array.from(fileList.children).find(item => 
+                        item.textContent.includes(file.fileName)
+                    );
+                    if (fileItem) {
+                        const status = fileItem.querySelector('.status');
+                        status.textContent = '✅ Success';
+                        status.style.color = 'green';
+                    }
+                });
+                
+                result.failed.forEach((file, index) => {
+                    const fileItem = Array.from(fileList.children).find(item => 
+                        item.textContent.includes(file.fileName)
+                    );
+                    if (fileItem) {
+                        const status = fileItem.querySelector('.status');
+                        status.textContent = '❌ Failed';
+                        status.style.color = 'red';
+                    }
+                });
+                
+                const resultType = result.success ? 'success' : 'info';
+                showResult('multiple-result', `
+                    <strong>Upload Completed!</strong><br>
+                    <strong>Total Files:</strong> ${result.totalFiles}<br>
+                    <strong>Successful:</strong> ${result.successCount}<br>
+                    <strong>Failed:</strong> ${result.errorCount}
+                `, resultType);
+                
+            } catch (error) {
+                showResult('multiple-result', `❌ Batch Upload Failed: ${error.message}`, 'error');
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload All Files';
+                showProgress('multipleProgress', 'multipleProgressFill', 0);
+            }
+        }
+        
+        async function getDownloadUrl() {
+            const key = document.getElementById('fileKey').value;
+            
+            if (!key) {
+                showResult('management-result', 'Please enter a file key', 'error');
+                return;
+            }
+            
+            try {
+                initUploadService();
+                const downloadUrl = await uploadService.getDownloadUrl(key, 3600);
+                
+                showResult('management-result', `
+                    <strong>✅ Download URL Generated!</strong><br>
+                    <a href="${downloadUrl}" target="_blank" style="color: #007bff; text-decoration: none;">
+                        🔗 Click to Download File
+                    </a><br>
+                    <small>URL expires in 1 hour</small>
+                `, 'success');
+                
+            } catch (error) {
+                showResult('management-result', `❌ Failed to get download URL: ${error.message}`, 'error');
+            }
+        }
+        
+        async function verifyFile() {
+            const key = document.getElementById('fileKey').value;
+            
+            if (!key) {
+                showResult('management-result', 'Please enter a file key', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/presigned/verify/${encodeURIComponent(key)}`, {
+                    headers: {
+                        'Authorization': `Bearer ${getToken()}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const { data } = await response.json();
+                    showResult('management-result', `
+                        <strong>✅ File Verified!</strong><br>
+                        <strong>Size:</strong> ${(data.size / 1024).toFixed(2)} KB<br>
+                        <strong>Type:</strong> ${data.contentType}<br>
+                        <strong>Last Modified:</strong> ${new Date(data.lastModified).toLocaleString()}
+                    `, 'success');
+                } else {
+                    const error = await response.json();
+                    showResult('management-result', `❌ File not found: ${error.message}`, 'error');
+                }
+                
+            } catch (error) {
+                showResult('management-result', `❌ Verification failed: ${error.message}`, 'error');
+            }
+        }
+        
+        async function deleteFile() {
+            const key = document.getElementById('fileKey').value;
+            
+            if (!key) {
+                showResult('management-result', 'Please enter a file key', 'error');
+                return;
+            }
+            
+            if (!confirm(`Are you sure you want to delete: ${key}?`)) {
+                return;
+            }
+            
+            try {
+                initUploadService();
+                await uploadService.deleteFile(key);
+                showResult('management-result', '✅ File deleted successfully!', 'success');
+                document.getElementById('fileKey').value = '';
+                
+            } catch (error) {
+                showResult('management-result', `❌ Delete failed: ${error.message}`, 'error');
+            }
+        }
+        
+        async function getAllowedTypes() {
+            try {
+                initUploadService();
+                const types = await uploadService.getAllowedTypes();
+                
+                let html = '<strong>✅ Allowed File Types & Limits:</strong><br><pre>';
+                for (const [category, config] of Object.entries(types)) {
+                    html += `<strong>${category.toUpperCase()}:</strong>\n`;
+                    html += `  Types: ${config.types.join(', ')}\n`;
+                    html += `  Max Size: ${(config.maxSize / 1024 / 1024).toFixed(1)} MB\n\n`;
+                }
+                html += '</pre>';
+                
+                showResult('types-result', html, 'success');
+                
+            } catch (error) {
+                showResult('types-result', `❌ Failed to get file types: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
