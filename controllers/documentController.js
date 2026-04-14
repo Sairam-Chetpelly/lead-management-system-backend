@@ -511,8 +511,33 @@ exports.downloadDocument = async (req, res) => {
       });
     }
     
-    res.download(document.filePath, document.fileName);
+    // Stream file directly from S3 with proper download headers
+    const https = require('https');
+    const s3Url = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${document.s3Key}`;
+    
+    // Set response headers for download
+    res.setHeader('Content-Disposition', `attachment; filename="${document.fileName}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    
+    // Stream from S3 URL
+    https.get(s3Url, (s3Response) => {
+      if (s3Response.statusCode === 200) {
+        // Set content length if available
+        if (s3Response.headers['content-length']) {
+          res.setHeader('Content-Length', s3Response.headers['content-length']);
+        }
+        s3Response.pipe(res);
+      } else {
+        return errorResponse(res, 'File not found in storage', 404);
+      }
+    }).on('error', (error) => {
+      console.error('S3 stream error:', error);
+      return errorResponse(res, 'Failed to download file', 500);
+    });
+    
   } catch (error) {
+    console.error('Download error:', error);
     return errorResponse(res, error.message, 500);
   }
 };

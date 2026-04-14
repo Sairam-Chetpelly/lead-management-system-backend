@@ -187,22 +187,68 @@ exports.multiDownload = async (req, res) => {
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+    res.setHeader('Cache-Control', 'no-cache');
 
     archive.pipe(res);
 
-    // Add files to archive
+    // Add files to archive from S3
+    const https = require('https');
+    let filesProcessed = 0;
+    
     for (const doc of documents) {
-      if (fs.existsSync(doc.filePath)) {
-        archive.file(doc.filePath, { name: doc.fileName });
+      try {
+        const s3Url = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${doc.s3Key}`;
+        
+        // Create a promise for each file download
+        const filePromise = new Promise((resolve, reject) => {
+          https.get(s3Url, (s3Response) => {
+            if (s3Response.statusCode === 200) {
+              archive.append(s3Response, { name: doc.fileName });
+              s3Response.on('end', () => {
+                filesProcessed++;
+                if (filesProcessed === documents.length) {
+                  archive.finalize();
+                }
+                resolve(true);
+              });
+            } else {
+              console.error(`Failed to download ${doc.fileName} from S3`);
+              filesProcessed++;
+              if (filesProcessed === documents.length) {
+                archive.finalize();
+              }
+              resolve(false);
+            }
+          }).on('error', (error) => {
+            console.error(`Error downloading ${doc.fileName}:`, error);
+            filesProcessed++;
+            if (filesProcessed === documents.length) {
+              archive.finalize();
+            }
+            resolve(false);
+          });
+        });
+        
+        await filePromise;
+      } catch (error) {
+        console.error(`Error processing ${doc.fileName}:`, error);
+        filesProcessed++;
+        if (filesProcessed === documents.length) {
+          archive.finalize();
+        }
       }
     }
-
-    archive.finalize();
+    
+    // If no documents were processed, finalize anyway
+    if (documents.length === 0) {
+      archive.finalize();
+    }
+    
   } catch (error) {
+    console.error('Multi-download error:', error);
     return errorResponse(res, error.message, 500);
   }
 };
-
 // Download entire folder
 exports.downloadFolder = async (req, res) => {
   try {
@@ -297,6 +343,7 @@ exports.downloadFolder = async (req, res) => {
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+    res.setHeader('Cache-Control', 'no-cache');
 
     archive.pipe(res);
 
@@ -310,16 +357,62 @@ exports.downloadFolder = async (req, res) => {
       }
     }
 
-    // Add documents to their respective folders
+    // Add documents to their respective folders from S3
+    const https = require('https');
+    let filesProcessed = 0;
+    
     for (const doc of documents) {
-      if (fs.existsSync(doc.filePath)) {
+      try {
+        const s3Url = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${doc.s3Key}`;
         const documentPath = `${doc.folderPath}${doc.fileName}`;
-        archive.file(doc.filePath, { name: documentPath });
+        
+        // Create a promise for each file download
+        const filePromise = new Promise((resolve, reject) => {
+          https.get(s3Url, (s3Response) => {
+            if (s3Response.statusCode === 200) {
+              archive.append(s3Response, { name: documentPath });
+              s3Response.on('end', () => {
+                filesProcessed++;
+                if (filesProcessed === documents.length) {
+                  archive.finalize();
+                }
+                resolve(true);
+              });
+            } else {
+              console.error(`Failed to download ${doc.fileName} from S3`);
+              filesProcessed++;
+              if (filesProcessed === documents.length) {
+                archive.finalize();
+              }
+              resolve(false);
+            }
+          }).on('error', (error) => {
+            console.error(`Error downloading ${doc.fileName}:`, error);
+            filesProcessed++;
+            if (filesProcessed === documents.length) {
+              archive.finalize();
+            }
+            resolve(false);
+          });
+        });
+        
+        await filePromise;
+      } catch (error) {
+        console.error(`Error processing ${doc.fileName}:`, error);
+        filesProcessed++;
+        if (filesProcessed === documents.length) {
+          archive.finalize();
+        }
       }
     }
-
-    archive.finalize();
+    
+    // If no documents were processed, finalize anyway
+    if (documents.length === 0) {
+      archive.finalize();
+    }
+    
   } catch (error) {
+    console.error('Folder download error:', error);
     return errorResponse(res, error.message, 500);
   }
 };
