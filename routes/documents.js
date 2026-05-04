@@ -11,6 +11,8 @@ router.get('/:id/view', authenticateTokenFlexible, documentController.viewDocume
 router.use(authenticateToken);
 
 // S3 Upload routes
+router.post('/upload-urls', documentController.getUploadUrls);
+router.post('/create', documentController.createDocument);
 router.post('/s3/initialize', documentController.initializeS3Upload);
 router.post('/s3/complete', documentController.completeS3Upload);
 router.post('/s3/abort', documentController.abortS3Upload);

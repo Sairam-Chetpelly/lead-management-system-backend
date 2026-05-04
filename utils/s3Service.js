@@ -10,10 +10,10 @@ const s3Client = new S3Client({
 });
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME;
-const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB chunks for better progress tracking
+const CHUNK_SIZE = 50 * 1024 * 1024; // 50MB chunks for better performance with large files
 
 class S3Service {
-  // Generate pre-signed URL for single file upload (< 100MB)
+  // Generate pre-signed URL for single file upload (< 200MB)
   static async getPresignedUploadUrl(key, contentType, expiresIn = 3600) {
     const command = new PutObjectCommand({
       Bucket: BUCKET_NAME,

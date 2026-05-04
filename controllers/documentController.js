@@ -26,8 +26,31 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 500 * 1024 * 1024 } // Increased to 500MB
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 } // Increased to 2GB
 });
+
+// Get presigned upload URLs (similar to processing system)
+exports.getUploadUrls = async (req, res) => {
+  try {
+    const { fileName, fileType, folderId } = req.body;
+    
+    if (!fileName || !fileType) {
+      return errorResponse(res, 'fileName and fileType are required', 400);
+    }
+
+    const s3Key = await S3Service.generateS3KeyByFolder(req.user.userId, fileName, folderId);
+    const presignedUrl = await S3Service.getPresignedUploadUrl(s3Key, fileType);
+    const publicUrl = `${process.env.NEXT_PUBLIC_S3_BASE_URL}${s3Key}`;
+    
+    return successResponse(res, {
+      key: s3Key,
+      url: presignedUrl,
+      publicUrl
+    }, 'Upload URL generated');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
 
 // Initialize S3 upload (for files > 100MB)
 exports.initializeS3Upload = async (req, res) => {
@@ -41,8 +64,8 @@ exports.initializeS3Upload = async (req, res) => {
     const s3Key = await S3Service.generateS3KeyByFolder(req.user.userId, fileName, folderId);
     const totalParts = S3Service.calculateParts(fileSize);
     
-    // For files < 50MB, use single upload
-    if (fileSize < 50 * 1024 * 1024) {
+    // For files < 200MB, use single upload
+    if (fileSize < 200 * 1024 * 1024) {
       const presignedUrl = await S3Service.getPresignedUploadUrl(s3Key, fileType);
       return successResponse(res, {
         uploadType: 'single',
@@ -67,6 +90,69 @@ exports.initializeS3Upload = async (req, res) => {
       totalParts,
       presignedUrls
     }, 'Multipart upload initialized');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// Create document record after S3 upload (similar to processing system)
+exports.createDocument = async (req, res) => {
+  try {
+    const { 
+      s3Key, 
+      fileName, 
+      fileSize, 
+      fileType,
+      category, 
+      description, 
+      folderId, 
+      keywords, 
+      title, 
+      subtitle 
+    } = req.body;
+    
+    if (!s3Key || !fileName || !fileSize || !fileType) {
+      return errorResponse(res, 'Missing required fields', 400);
+    }
+
+    // Process keywords
+    let keywordIds = [];
+    if (keywords) {
+      const keywordArray = Array.isArray(keywords) ? keywords : keywords.split(',').map(k => k.trim());
+      
+      for (const keywordName of keywordArray) {
+        if (keywordName) {
+          let keyword = await Keyword.findOne({ name: keywordName.toLowerCase() });
+          if (!keyword) {
+            keyword = await Keyword.create({ name: keywordName.toLowerCase() });
+          }
+          keyword.usageCount += 1;
+          await keyword.save();
+          keywordIds.push(keyword._id);
+        }
+      }
+    }
+
+    // Create document record
+    const document = new Document({
+      folderId: folderId || null,
+      fileName,
+      title: title || fileName.split('.')[0],
+      subtitle,
+      filePath: s3Key,
+      s3Key,
+      fileType,
+      fileSize,
+      uploadedBy: req.user.userId,
+      category: category || 'Other',
+      description,
+      keywords: keywordIds
+    });
+
+    await document.save();
+    await document.populate(['uploadedBy', 'keywords', 'folderId']);
+
+    return successResponse(res, document, 'Document created successfully', 201);
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
@@ -244,7 +330,7 @@ exports.uploadDocument = [
       const fileSize = fileStats.size;
       console.log('13. File size after processing:', fileSize, 'bytes');
       
-      if (fileSize > 50 * 1024 * 1024) { // Files > 50MB use multipart (lowered threshold for testing)
+      if (fileSize > 200 * 1024 * 1024) { // Files > 200MB use multipart
         console.log('13a. Large file detected, using multipart upload');
         const { CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand } = require('@aws-sdk/client-s3');
         
@@ -264,7 +350,7 @@ exports.uploadDocument = [
         console.log('13b. Multipart upload initialized:', UploadId);
         
         // Upload parts in chunks
-        const chunkSize = 10 * 1024 * 1024; // 10MB chunks
+        const chunkSize = 50 * 1024 * 1024; // 50MB chunks for large files
         const fileBuffer = fs.readFileSync(processedFilePath);
         const totalParts = Math.ceil(fileSize / chunkSize);
         const parts = [];
