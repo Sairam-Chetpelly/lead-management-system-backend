@@ -10,6 +10,13 @@ router.get('/:id/view', authenticateTokenFlexible, documentController.viewDocume
 // All other routes require standard authentication
 router.use(authenticateToken);
 
+// Download limit and logging routes (must come before /:id routes)
+router.get('/download-limit', documentController.checkDownloadLimit);
+router.post('/log-download', documentController.logDownload);
+router.get('/download-stats', documentController.getDownloadStats);
+router.post('/multi-download', documentController.multiDownload);
+router.post('/details', documentController.getDocumentDetails);
+
 // S3 Upload routes
 router.post('/upload-urls', documentController.getUploadUrls);
 router.post('/create', documentController.createDocument);

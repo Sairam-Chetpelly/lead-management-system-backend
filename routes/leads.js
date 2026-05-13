@@ -1805,7 +1805,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 let graphResponse;
                 try {
                   graphResponse = await axios.get(
-                    `https://graph.facebook.com/v20.0/${leadgen_id}`,
+                    `https://graph.facebook.com/v25.0/${leadgen_id}`,
                     {
                       params: {
                         access_token: await getCurrentToken(),
@@ -1818,7 +1818,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     console.log('Token expired, refreshing...');
                     await refreshMetaToken();
                     graphResponse = await axios.get(
-                      `https://graph.facebook.com/v20.0/${leadgen_id}`,
+                      `https://graph.facebook.com/v25.0/${leadgen_id}`,
                       {
                         params: {
                           access_token: await getCurrentToken(),
@@ -1840,7 +1840,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 
                 // Fetch ad details for campaign info
                 const adResponse = await axios.get(
-                  `https://graph.facebook.com/v23.0/${ad_id}`,
+                  `https://graph.facebook.com/v25.0/${ad_id}`,
                   {
                     params: {
                       access_token: await getCurrentToken(),
@@ -1861,7 +1861,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                 let graphResponse;
                 try {
                   graphResponse = await axios.get(
-                    `https://graph.facebook.com/v20.0/${leadgen_id}`,
+                    `https://graph.facebook.com/v25.0/${leadgen_id}`,
                     {
                       params: {
                         access_token: await getCurrentToken(),
@@ -1874,7 +1874,7 @@ router.post('/webhook/meta-ads', async (req, res) => {
                     console.log('Token expired, refreshing...');
                     await refreshMetaToken();
                     graphResponse = await axios.get(
-                      `https://graph.facebook.com/v20.0/${leadgen_id}`,
+                      `https://graph.facebook.com/v25.0/${leadgen_id}`,
                       {
                         params: {
                           access_token: await getCurrentToken(),

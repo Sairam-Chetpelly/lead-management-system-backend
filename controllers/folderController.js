@@ -249,6 +249,71 @@ exports.multiDownload = async (req, res) => {
     return errorResponse(res, error.message, 500);
   }
 };
+// Get folder structure for frontend ZIP creation
+exports.getFolderStructure = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Get folder info
+    const folder = await Folder.findOne({ _id: id, deletedAt: null });
+    if (!folder) {
+      return errorResponse(res, 'Folder not found', 404);
+    }
+
+    // Check if folder is restricted
+    if (folder.restricted) {
+      return errorResponse(res, 'This folder is restricted and cannot be downloaded', 403);
+    }
+
+    // Get all folders and documents recursively with proper hierarchy
+    const getAllFolderData = async (currentFolderId, currentPath = '') => {
+      const currentFolder = await Folder.findOne({ _id: currentFolderId, deletedAt: null });
+      if (!currentFolder) return { folders: [], documents: [] };
+
+      const folderPath = currentPath ? `${currentPath}${currentFolder.name}/` : `${currentFolder.name}/`;
+      
+      // Get documents in current folder
+      const documents = await Document.find({ 
+        folderId: currentFolderId, 
+        deletedAt: null 
+      });
+      
+      // Get subfolders
+      const subfolders = await Folder.find({ 
+        parentFolderId: currentFolderId, 
+        deletedAt: null 
+      });
+      
+      let allFolders = [{ folder: currentFolder, path: folderPath }];
+      let allDocuments = documents.map(doc => ({ 
+        ...doc.toObject(), 
+        folderPath 
+      }));
+      
+      // Recursively get data from subfolders
+      for (const subfolder of subfolders) {
+        const subData = await getAllFolderData(subfolder._id, folderPath);
+        allFolders = [...allFolders, ...subData.folders];
+        allDocuments = [...allDocuments, ...subData.documents];
+      }
+      
+      return { folders: allFolders, documents: allDocuments };
+    };
+
+    const { folders, documents } = await getAllFolderData(id);
+    
+    return successResponse(res, {
+      folder,
+      folders,
+      documents,
+      totalFiles: documents.length
+    }, 'Folder structure retrieved successfully');
+  } catch (error) {
+    console.error('Get folder structure error:', error);
+    return errorResponse(res, error.message, 500);
+  }
+};
+
 // Download entire folder
 exports.downloadFolder = async (req, res) => {
   try {

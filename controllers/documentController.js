@@ -603,7 +603,7 @@ exports.downloadDocument = async (req, res) => {
     
     // Set response headers for download
     res.setHeader('Content-Disposition', `attachment; filename="${document.fileName}"`);
-    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Type', document.fileType || 'application/octet-stream');
     res.setHeader('Cache-Control', 'no-cache');
     
     // Stream from S3 URL
@@ -715,6 +715,286 @@ exports.updateDocument = async (req, res) => {
     await document.populate(['uploadedBy', 'keywords', 'folderId']);
     
     return successResponse(res, document, 'Document updated successfully');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// Multi-download documents
+exports.multiDownload = async (req, res) => {
+  try {
+    const { documentIds } = req.body;
+    
+    if (!documentIds || !Array.isArray(documentIds) || documentIds.length === 0) {
+      return errorResponse(res, 'Document IDs are required', 400);
+    }
+
+    // Check user role and download limit
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+
+    // Admin has unlimited downloads, others have 50 limit
+    if (userRole !== 'admin') {
+      // Get today's start and end timestamps
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Count today's downloads for this user
+      const todayDownloads = await DownloadLog.countDocuments({
+        userId: req.user.userId,
+        downloadDate: { $gte: startOfDay, $lte: endOfDay }
+      });
+
+      // Check if limit exceeded (considering bulk download as multiple downloads)
+      if (todayDownloads + documentIds.length > 50) {
+        return errorResponse(res, `Daily download limit exceeded. You can download ${50 - todayDownloads} more documents today. Limit resets at midnight.`, 400);
+      }
+    }
+
+    // Get documents
+    const documents = await Document.find({ 
+      _id: { $in: documentIds }, 
+      deletedAt: null 
+    });
+
+    if (documents.length === 0) {
+      return errorResponse(res, 'No valid documents found', 404);
+    }
+
+    // Log downloads for non-admin users only
+    if (userRole !== 'admin') {
+      const downloadLogs = documents.map(doc => ({
+        userId: req.user.userId,
+        documentId: doc._id,
+        downloadDate: new Date()
+      }));
+      await DownloadLog.insertMany(downloadLogs);
+    }
+
+    // Create zip file
+    const archiver = require('archiver');
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    const zipName = `documents_${Date.now()}.zip`;
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+
+    archive.pipe(res);
+
+    // Add files to archive from S3
+    const https = require('https');
+    let filesProcessed = 0;
+    
+    for (const doc of documents) {
+      try {
+        const s3Url = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${doc.s3Key}`;
+        
+        // Create a promise for each file download
+        const filePromise = new Promise((resolve, reject) => {
+          https.get(s3Url, (s3Response) => {
+            if (s3Response.statusCode === 200) {
+              archive.append(s3Response, { name: doc.fileName });
+              s3Response.on('end', () => {
+                filesProcessed++;
+                if (filesProcessed === documents.length) {
+                  archive.finalize();
+                }
+                resolve(true);
+              });
+            } else {
+              console.error(`Failed to download ${doc.fileName} from S3`);
+              filesProcessed++;
+              if (filesProcessed === documents.length) {
+                archive.finalize();
+              }
+              resolve(false);
+            }
+          }).on('error', (error) => {
+            console.error(`Error downloading ${doc.fileName}:`, error);
+            filesProcessed++;
+            if (filesProcessed === documents.length) {
+              archive.finalize();
+            }
+            resolve(false);
+          });
+        });
+        
+        await filePromise;
+      } catch (error) {
+        console.error(`Error processing ${doc.fileName}:`, error);
+        filesProcessed++;
+        if (filesProcessed === documents.length) {
+          archive.finalize();
+        }
+      }
+    }
+    
+    // If no documents were processed, finalize anyway
+    if (documents.length === 0) {
+      archive.finalize();
+    }
+    
+  } catch (error) {
+    console.error('Multi-download error:', error);
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// Get document details for frontend ZIP creation
+exports.getDocumentDetails = async (req, res) => {
+  try {
+    const { documentIds } = req.body;
+    
+    if (!documentIds || !Array.isArray(documentIds) || documentIds.length === 0) {
+      return errorResponse(res, 'Document IDs are required', 400);
+    }
+
+    // Get documents
+    const documents = await Document.find({ 
+      _id: { $in: documentIds }, 
+      deletedAt: null 
+    }).select('_id fileName s3Key fileType fileSize');
+
+    if (documents.length === 0) {
+      return errorResponse(res, 'No valid documents found', 404);
+    }
+
+    return successResponse(res, documents, 'Document details retrieved successfully');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// Check download limit
+exports.checkDownloadLimit = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+    const isAdmin = userRole === 'admin';
+
+    if (isAdmin) {
+      return successResponse(res, {
+        canDownload: true,
+        downloadsToday: 0,
+        limit: -1, // Unlimited for admin
+        isAdmin: true
+      }, 'Admin has unlimited downloads');
+    }
+
+    // Get today's start and end timestamps
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Count today's downloads for this user
+    const downloadsToday = await DownloadLog.countDocuments({
+      userId: req.user.userId,
+      downloadDate: { $gte: startOfDay, $lte: endOfDay }
+    });
+
+    const limit = 50;
+    const canDownload = downloadsToday < limit;
+
+    return successResponse(res, {
+      canDownload,
+      downloadsToday,
+      limit,
+      isAdmin: false
+    }, 'Download limit checked');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// Log download
+exports.logDownload = async (req, res) => {
+  try {
+    const { documentId } = req.body;
+    
+    if (!documentId) {
+      return errorResponse(res, 'Document ID is required', 400);
+    }
+
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+
+    // Only log downloads for non-admin users
+    if (userRole !== 'admin') {
+      // Check if document exists
+      const document = await Document.findOne({ _id: documentId, deletedAt: null });
+      if (!document) {
+        return errorResponse(res, 'Document not found', 404);
+      }
+
+      // Check daily limit
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const todayDownloads = await DownloadLog.countDocuments({
+        userId: req.user.userId,
+        downloadDate: { $gte: startOfDay, $lte: endOfDay }
+      });
+
+      if (todayDownloads >= 50) {
+        return errorResponse(res, 'Daily download limit reached', 429);
+      }
+
+      // Log the download
+      await DownloadLog.create({
+        userId: req.user.userId,
+        documentId: document._id,
+        downloadDate: new Date()
+      });
+    }
+
+    return successResponse(res, null, 'Download logged successfully');
+  } catch (error) {
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+// Get download statistics
+exports.getDownloadStats = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('roleId');
+    const userRole = user?.roleId?.slug;
+    const isAdmin = userRole === 'admin';
+
+    if (isAdmin) {
+      return successResponse(res, {
+        downloadsToday: 0,
+        totalDownloads: 0,
+        limit: -1
+      }, 'Admin stats');
+    }
+
+    // Get today's downloads
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const downloadsToday = await DownloadLog.countDocuments({
+      userId: req.user.userId,
+      downloadDate: { $gte: startOfDay, $lte: endOfDay }
+    });
+
+    // Get total downloads
+    const totalDownloads = await DownloadLog.countDocuments({
+      userId: req.user.userId
+    });
+
+    return successResponse(res, {
+      downloadsToday,
+      totalDownloads,
+      limit: 50
+    }, 'Download stats retrieved');
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }

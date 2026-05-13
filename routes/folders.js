@@ -9,6 +9,7 @@ router.post('/', folderController.createFolder);
 router.get('/all', folderController.getAllFolders);
 router.get('/', folderController.getFolders);
 router.post('/multi-download', folderController.multiDownload);
+router.get('/:id/structure', folderController.getFolderStructure);
 router.get('/:id/download', folderController.downloadFolder);
 router.get('/:id', folderController.getFolderContents);
 router.put('/:id', folderController.updateFolder);
